@@ -4,7 +4,4 @@
   "outputDirectory": ".next",
   "installCommand": "npm install",
   "regions": ["gru1"],
-  "env": {
-    "NEXT_PUBLIC_API_URL": "@glowdesk_api_url"
-  }
 }
