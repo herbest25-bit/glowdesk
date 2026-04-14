@@ -1,0 +1,28 @@
+# Dependências
+node_modules/
+.npm
+
+# Ambiente
+.env
+.env.local
+.env.production
+
+# WhatsApp Web (sessões locais — não commitar)
+backend/.wwebjs_auth/
+backend/.wwebjs_cache/
+
+# Next.js
+frontend/.next/
+frontend/out/
+
+# Build
+dist/
+build/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
