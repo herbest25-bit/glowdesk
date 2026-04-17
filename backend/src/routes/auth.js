@@ -1,9 +1,5 @@
 import { db } from '../utils/db.js'
-import { createHash } from 'crypto'
-
-function hashPassword(password) {
-  return createHash('sha256').update(password + process.env.JWT_SECRET).digest('hex')
-}
+import bcrypt from 'bcryptjs'
 
 export async function authRoutes(fastify) {
   // Login
@@ -20,7 +16,8 @@ export async function authRoutes(fastify) {
     }
 
     const user = result.rows[0]
-    if (user.password_hash !== hashPassword(password)) {
+    const valid = await bcrypt.compare(password, user.password_hash)
+    if (!valid) {
       return reply.status(401).send({ error: 'Email ou senha incorretos' })
     }
 
@@ -54,10 +51,12 @@ export async function authRoutes(fastify) {
       return reply.status(409).send({ error: 'Email já cadastrado' })
     }
 
+    const password_hash = await bcrypt.hash(password, 10)
+
     const result = await db.query(
       `INSERT INTO users (workspace_id, name, email, password_hash, role)
        VALUES ($1, $2, $3, $4, $5) RETURNING id, name, email, role`,
-      [workspaceId, name, email, hashPassword(password), role]
+      [workspaceId, name, email, password_hash, role]
     )
 
     return reply.status(201).send({ user: result.rows[0] })
