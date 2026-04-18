@@ -28,8 +28,8 @@ await fastify.register(cors, {
       'http://localhost:3000',
       'http://localhost:3001',
     ].filter(Boolean)
-    // Permite *.vercel.app e domínios configurados
-    if (!origin || allowed.includes(origin) || origin.endsWith('.vercel.app')) {
+    // Permite *.vercel.app, *.glowdeskhq.com.br e domínios configurados
+    if (!origin || allowed.includes(origin) || origin.endsWith('.vercel.app') || origin.endsWith('.glowdeskhq.com.br') || origin === 'https://glowdeskhq.com.br') {
       cb(null, true)
     } else {
       cb(new Error('Not allowed by CORS'), false)
