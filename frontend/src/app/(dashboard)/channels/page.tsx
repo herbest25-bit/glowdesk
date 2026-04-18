@@ -4,7 +4,7 @@ import { api } from '@/lib/api'
 import { getSocket } from '@/lib/socket'
 import {
   Phone, Plus, X, CheckCircle, XCircle, Wifi, WifiOff,
-  RefreshCw, Trash2, Edit2, Check
+  RefreshCw, Trash2, Edit2, Check, RotateCcw
 } from 'lucide-react'
 
 type Channel = {
@@ -39,6 +39,7 @@ export default function ChannelsPage() {
   const [startError, setStartError] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
   const creatingIdRef = useRef<string | null>(null)
+  const [reconnectingId, setReconnectingId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -113,6 +114,24 @@ export default function ChannelsPage() {
     } catch (e) {
       console.error(e)
       setRefreshing(false)
+    }
+  }
+
+  async function reconnectChannel(ch: Channel) {
+    setReconnectingId(ch.id)
+    setCreatingId(ch.id)
+    creatingIdRef.current = ch.id
+    setChannelName(ch.name)
+    setQrCode(null)
+    setQrExpiry(60)
+    setStep('qrcode')
+    setShowModal(true)
+    try {
+      await api.get(`/api/channels/${ch.id}/qrcode`)
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setReconnectingId(null)
     }
   }
 
@@ -236,6 +255,17 @@ export default function ChannelsPage() {
                 </div>
 
                 <div className="flex items-center gap-2 flex-shrink-0">
+                  <button
+                    onClick={() => reconnectChannel(ch)}
+                    disabled={reconnectingId === ch.id}
+                    className="p-2 rounded-lg transition-colors"
+                    style={{ color: '#5a5a6e' }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(16,185,129,0.12)'; (e.currentTarget as HTMLElement).style.color = '#6ee7b7' }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = ''; (e.currentTarget as HTMLElement).style.color = '#5a5a6e' }}
+                    title="Reconectar"
+                  >
+                    <RotateCcw className={`w-3.5 h-3.5 ${reconnectingId === ch.id ? 'animate-spin' : ''}`} />
+                  </button>
                   <button
                     onClick={() => { setEditingId(ch.id); setEditingName(ch.name) }}
                     className="p-2 rounded-lg transition-colors"
