@@ -84,6 +84,16 @@ try {
     )
   `)
 } catch (_) {}
+try {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS channel_sessions (
+      session_id VARCHAR(255) PRIMARY KEY,
+      session_data TEXT NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `)
+  console.log('[Migration] channel_sessions: OK')
+} catch (e) { console.log('[Migration] channel_sessions ERRO:', e.message) }
 
 // ── Iniciar servidor ───────────────────────────────────────────
 const PORT = Number(process.env.PORT) || 3001

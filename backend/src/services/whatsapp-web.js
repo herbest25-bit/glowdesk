@@ -1,10 +1,44 @@
 import pkg from 'whatsapp-web.js'
-const { Client, LocalAuth } = pkg
+const { Client, RemoteAuth } = pkg
 import qrcode from 'qrcode'
 import { db } from '../utils/db.js'
 import { getIO } from './realtime.js'
+import fs from 'fs'
 
 const sessions = new Map() // channelId → Client
+
+// ─── Store de sessão no banco de dados ───────────────────────────────────────
+function makeStore() {
+  return {
+    async sessionExists({ session }) {
+      const r = await db.query('SELECT 1 FROM channel_sessions WHERE session_id = $1', [session])
+      return r.rows.length > 0
+    },
+    async save({ session }) {
+      const zipPath = `./${session}.zip`
+      if (!fs.existsSync(zipPath)) return
+      const data = fs.readFileSync(zipPath).toString('base64')
+      await db.query(
+        `INSERT INTO channel_sessions (session_id, session_data, updated_at)
+         VALUES ($1, $2, NOW())
+         ON CONFLICT (session_id) DO UPDATE SET session_data = $2, updated_at = NOW()`,
+        [session, data]
+      )
+      console.log(`[Session] Sessão salva no banco: ${session}`)
+    },
+    async extract({ session, path }) {
+      const r = await db.query('SELECT session_data FROM channel_sessions WHERE session_id = $1', [session])
+      if (!r.rows.length) throw new Error('Sessão não encontrada no banco')
+      const data = Buffer.from(r.rows[0].session_data, 'base64')
+      fs.writeFileSync(`${path}.zip`, data)
+      console.log(`[Session] Sessão restaurada do banco: ${session}`)
+    },
+    async delete({ session }) {
+      await db.query('DELETE FROM channel_sessions WHERE session_id = $1', [session])
+      console.log(`[Session] Sessão removida do banco: ${session}`)
+    }
+  }
+}
 
 // ─── Inicializar todos os canais conectados ao subir o servidor ───────────────
 export async function initChannels() {
@@ -31,7 +65,11 @@ export async function startSession(channelId, workspaceId) {
   }
 
   const client = new Client({
-    authStrategy: new LocalAuth({ clientId: channelId }),
+    authStrategy: new RemoteAuth({
+      clientId: channelId,
+      store: makeStore(),
+      backupSyncIntervalMs: 60_000
+    }),
     puppeteer: {
       headless: true,
       args: [
