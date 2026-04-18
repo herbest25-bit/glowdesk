@@ -101,11 +101,25 @@ export async function startSession(channelId, workspaceId) {
 
   client.on('message', async (msg) => {
     try {
-      if (msg.fromMe) return // ignorar mensagens enviadas por nós
-      console.log(`[Channels] ✉️ Mensagem de ${msg.from}: "${msg.body?.substring(0, 80)}"`)
+      if (msg.fromMe) return
+      if (msg.from === 'status@broadcast') return // ignorar status do WhatsApp
 
-      const phone = msg.from.replace('@c.us', '')
-      const contactName = msg._data?.notifyName || null
+      const isGroup = msg.from.endsWith('@g.us')
+      console.log(`[Channels] ✉️ ${isGroup ? 'Grupo' : 'Contato'} ${msg.from}: "${msg.body?.substring(0, 80)}"`)
+
+      let phone, contactName
+      if (isGroup) {
+        phone = msg.from.replace('@g.us', '')
+        try {
+          const chat = await msg.getChat()
+          contactName = chat.name || phone
+        } catch (_) {
+          contactName = phone
+        }
+      } else {
+        phone = msg.from.replace('@c.us', '')
+        contactName = msg._data?.notifyName || null
+      }
 
       // 1. Upsert contato
       const contactResult = await db.query(
