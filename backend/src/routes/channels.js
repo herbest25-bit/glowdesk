@@ -1,5 +1,5 @@
 import { db } from '../utils/db.js'
-import { startSession, destroySession } from '../services/whatsapp-web.js'
+import { startSession, destroySession, getSessions } from '../services/whatsapp-web.js'
 
 export default async function channelsRoutes(fastify) {
   // GET /api/channels — listar canais
@@ -10,7 +10,17 @@ export default async function channelsRoutes(fastify) {
        FROM channels WHERE workspace_id = $1 ORDER BY created_at DESC`,
       [workspaceId]
     )
-    return { channels: result.rows }
+    const activeSessions = getSessions()
+    const channels = result.rows.map(ch => ({
+      ...ch,
+      active: activeSessions.includes(ch.id)
+    }))
+    return { channels }
+  })
+
+  // GET /api/channels/sessions — sessões ativas em memória
+  fastify.get('/api/channels/sessions', async (req, reply) => {
+    return { activeSessions: getSessions() }
   })
 
   // POST /api/channels — criar canal

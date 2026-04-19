@@ -128,16 +128,21 @@ export async function conversationRoutes(fastify) {
         client = getSession(channelId)
       }
       console.log(`[Send] getSession(${channelId}): ${client ? 'OK' : 'NULL'}`)
-      if (!client) return reply.status(400).send({ error: 'Canal WhatsApp Web não está conectado' })
-      const { media_base64, media_mimetype, media_filename } = req.body
-      if (media_base64 && media_mimetype) {
-        const wwjs = await import('whatsapp-web.js')
-        const MM = wwjs.default.MessageMedia
-        const media = new MM(media_mimetype, media_base64, media_filename || 'arquivo')
-        await client.sendMessage(`${conv.phone}@c.us`, media)
-      } else {
-        const jid = conv.is_group ? `${conv.phone}@g.us` : `${conv.phone}@c.us`
-        await client.sendMessage(jid, content)
+      if (!client) return reply.status(400).send({ error: 'Canal WhatsApp não está conectado. Vá em Canais e reconecte.' })
+      try {
+        const { media_base64, media_mimetype, media_filename } = req.body
+        if (media_base64 && media_mimetype) {
+          const wwjs = await import('whatsapp-web.js')
+          const MM = wwjs.default.MessageMedia
+          const media = new MM(media_mimetype, media_base64, media_filename || 'arquivo')
+          await client.sendMessage(`${conv.phone}@c.us`, media)
+        } else {
+          const jid = conv.is_group ? `${conv.phone}@g.us` : `${conv.phone}@c.us`
+          await client.sendMessage(jid, content)
+        }
+      } catch (sendErr) {
+        console.error('[Send] Erro ao enviar via WhatsApp Web:', sendErr.message)
+        return reply.status(400).send({ error: `Falha ao enviar: ${sendErr.message}. Reconecte o canal em Canais.` })
       }
     } else if (conv.phone_number_id && conv.access_token) {
       // Meta API

@@ -399,6 +399,7 @@ export default function InboxPage() {
   const [search, setSearch] = useState('')
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState('')
+  const [noChannelActive, setNoChannelActive] = useState(false)
   const [view, setView] = useState<'list' | 'kanban'>('list')
   const [showNewConv, setShowNewConv] = useState(false)
   const [bantData, setBantData] = useState<BantData | null>(null)
@@ -421,6 +422,13 @@ export default function InboxPage() {
     : {}
 
   useEffect(() => {
+    // Verificar se há canais ativos em memória
+    api.get('/api/channels/sessions').then((d: any) => {
+      setNoChannelActive(!d.activeSessions || d.activeSessions.length === 0)
+    }).catch(() => {})
+  }, [])
+
+  useEffect(() => {
     loadConversations()
     const socket = getSocket(user.workspaceId)
     socket.on('new_message', ({ conversationId, message }: any) => {
@@ -440,10 +448,18 @@ export default function InboxPage() {
     })
     socket.on('conversation_updated', () => loadConversations())
     socket.on('transfer_to_human', () => loadConversations())
+    socket.on('channel_connected', () => setNoChannelActive(false))
+    socket.on('channel_disconnected', () => {
+      api.get('/api/channels/sessions').then((d: any) => {
+        setNoChannelActive(!d.activeSessions || d.activeSessions.length === 0)
+      }).catch(() => {})
+    })
     return () => {
       socket.off('new_message')
       socket.off('conversation_updated')
       socket.off('transfer_to_human')
+      socket.off('channel_connected')
+      socket.off('channel_disconnected')
     }
   }, [selected?.id])
 
@@ -757,6 +773,13 @@ export default function InboxPage() {
               placeholder="Buscar conversa..." className="input pl-9" />
           </div>
         </div>
+
+        {noChannelActive && (
+          <div className="mx-3 mt-2 px-3 py-2.5 rounded-xl text-xs flex items-start gap-2" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#fca5a5' }}>
+            <span className="flex-shrink-0 mt-0.5">⚠️</span>
+            <span>Nenhum canal WhatsApp conectado. <a href="/channels" className="underline font-semibold" style={{ color: '#f87171' }}>Vá em Canais</a> e reconecte para enviar e receber mensagens.</span>
+          </div>
+        )}
 
         <MeetingNotifBanner />
 

@@ -118,6 +118,23 @@ export async function startSession(channelId, workspaceId) {
     }
   })
 
+  client.on('auth_failure', async (msg) => {
+    console.log(`[Channels] Falha de autenticação: ${channelId} — ${msg}`)
+    sessions.delete(channelId)
+    try {
+      await db.query(
+        `UPDATE channels SET status = 'disconnected', updated_at = NOW() WHERE id = $1`,
+        [channelId]
+      )
+      const io = getIO()
+      if (io) {
+        io.to(`workspace:${workspaceId}`).emit('channel_disconnected', { channelId })
+      }
+    } catch (e) {
+      console.error('[Channels] Erro ao atualizar status após falha de auth:', e.message)
+    }
+  })
+
   client.on('disconnected', async (reason) => {
     console.log(`[Channels] Canal desconectado: ${channelId} — ${reason}`)
     sessions.delete(channelId)
