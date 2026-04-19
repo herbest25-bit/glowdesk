@@ -95,7 +95,7 @@ export async function conversationRoutes(fastify) {
     const { content } = req.body
 
     const convResult = await db.query(
-      `SELECT c.*, ct.phone,
+      `SELECT c.*, ct.phone, ct.is_group,
               wn.phone_number_id, wn.access_token,
               c.channel_id
        FROM conversations c
@@ -136,7 +136,8 @@ export async function conversationRoutes(fastify) {
         const media = new MM(media_mimetype, media_base64, media_filename || 'arquivo')
         await client.sendMessage(`${conv.phone}@c.us`, media)
       } else {
-        await client.sendMessage(`${conv.phone}@c.us`, content)
+        const jid = conv.is_group ? `${conv.phone}@g.us` : `${conv.phone}@c.us`
+        await client.sendMessage(jid, content)
       }
     } else if (conv.phone_number_id && conv.access_token) {
       // Meta API

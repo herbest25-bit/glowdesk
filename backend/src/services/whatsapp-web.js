@@ -161,12 +161,12 @@ export async function startSession(channelId, workspaceId) {
 
       // 1. Upsert contato
       const contactResult = await db.query(
-        `INSERT INTO contacts (workspace_id, phone, name)
-         VALUES ($1, $2, $3)
+        `INSERT INTO contacts (workspace_id, phone, name, is_group)
+         VALUES ($1, $2, $3, $4)
          ON CONFLICT (workspace_id, phone)
-         DO UPDATE SET name = COALESCE($3, contacts.name), updated_at = NOW()
+         DO UPDATE SET name = COALESCE($3, contacts.name), is_group = $4, updated_at = NOW()
          RETURNING *`,
-        [workspaceId, phone, contactName]
+        [workspaceId, phone, contactName, isGroup]
       )
       const contact = contactResult.rows[0]
       console.log(`[Channels] Contato: ${contact.id} (${contact.name || phone})`)

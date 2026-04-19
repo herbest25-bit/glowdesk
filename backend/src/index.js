@@ -85,6 +85,10 @@ try {
   `)
 } catch (_) {}
 try {
+  await db.query(`ALTER TABLE contacts ADD COLUMN IF NOT EXISTS is_group BOOLEAN DEFAULT false`)
+  console.log('[Migration] contacts.is_group: OK')
+} catch (e) { console.log('[Migration] contacts.is_group ERRO:', e.message) }
+try {
   await db.query(`
     CREATE TABLE IF NOT EXISTS channel_sessions (
       session_id VARCHAR(255) PRIMARY KEY,
