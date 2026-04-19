@@ -90,7 +90,7 @@ export async function conversationRoutes(fastify) {
 
   // Enviar mensagem (agente humano)
   fastify.post('/conversations/:id/messages', async (req, reply) => {
-    const { workspaceId, userId } = req.user
+    const { workspaceId, id: userId } = req.user
     const { id } = req.params
     const { content } = req.body
 
@@ -171,7 +171,7 @@ export async function conversationRoutes(fastify) {
 
   // Assumir conversa (desligar IA, atribuir para agente)
   fastify.patch('/conversations/:id/take-over', async (req, reply) => {
-    const { workspaceId, userId } = req.user
+    const { workspaceId, id: userId } = req.user
     const { id } = req.params
 
     await db.query(
@@ -231,7 +231,7 @@ export async function conversationRoutes(fastify) {
 
   // Iniciar nova conversa com número externo
   fastify.post('/conversations/initiate', async (req, reply) => {
-    const { workspaceId, userId } = req.user
+    const { workspaceId, id: userId } = req.user
     const { phone, name, message, channelId, whatsappNumberId } = req.body
 
     if (!phone || !message?.trim()) {
