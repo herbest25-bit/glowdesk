@@ -398,6 +398,7 @@ export default function InboxPage() {
   const [newMessage, setNewMessage] = useState('')
   const [search, setSearch] = useState('')
   const [sending, setSending] = useState(false)
+  const [sendError, setSendError] = useState('')
   const [view, setView] = useState<'list' | 'kanban'>('list')
   const [showNewConv, setShowNewConv] = useState(false)
   const [bantData, setBantData] = useState<BantData | null>(null)
@@ -650,6 +651,7 @@ export default function InboxPage() {
     e.preventDefault()
     if (!newMessage.trim() || !selected || sending) return
     setSending(true)
+    setSendError('')
     const text = newMessage
     setNewMessage('')
     try {
@@ -657,8 +659,7 @@ export default function InboxPage() {
       setMessages(prev => [...prev, res.message])
     } catch (err: unknown) {
       setNewMessage(text)
-      const msg = err instanceof Error ? err.message : 'Erro ao enviar mensagem'
-      alert(msg)
+      setSendError(err instanceof Error ? err.message : 'Erro ao enviar mensagem')
     } finally {
       setSending(false)
     }
@@ -959,6 +960,11 @@ export default function InboxPage() {
                     {EMOJIS.map(e => (
                       <button key={e} onClick={() => { setNewMessage(m => m + e); setShowEmojiPicker(false) }} className="text-xl hover:scale-125 transition-transform leading-none p-0.5">{e}</button>
                     ))}
+                  </div>
+                )}
+                {sendError && (
+                  <div className="mx-3 mb-1 text-xs px-3 py-2 rounded-lg" style={{ background: 'rgba(239,68,68,0.1)', color: '#fca5a5', border: '1px solid rgba(239,68,68,0.2)' }}>
+                    {sendError}
                   </div>
                 )}
                 <form onSubmit={sendMessage} className="px-3 py-3">

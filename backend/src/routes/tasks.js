@@ -3,7 +3,7 @@ import { db } from '../utils/db.js'
 export async function taskRoutes(fastify) {
   // Listar tarefas
   fastify.get('/tasks', async (req, reply) => {
-    const { workspaceId, userId, role } = req.user
+    const { workspaceId, id: userId, role } = req.user
     const { assignedTo, status, dueToday } = req.query
 
     let where = ['t.workspace_id = $1']
@@ -32,7 +32,7 @@ export async function taskRoutes(fastify) {
 
   // Criar tarefa
   fastify.post('/tasks', async (req, reply) => {
-    const { workspaceId, userId } = req.user
+    const { workspaceId, id: userId } = req.user
     const { contactId, dealId, assignedTo, title, description, type, priority, dueDate } = req.body
 
     const result = await db.query(
@@ -51,15 +51,13 @@ export async function taskRoutes(fastify) {
     const { id } = req.params
     const { status, title, dueDate, priority } = req.body
 
-    const completedAt = status === 'done' ? 'NOW()' : 'NULL'
-
     const result = await db.query(
       `UPDATE tasks SET
         status = COALESCE($1, status),
         title = COALESCE($2, title),
         due_date = COALESCE($3, due_date),
         priority = COALESCE($4, priority),
-        completed_at = ${completedAt},
+        completed_at = CASE WHEN $1 = 'done' THEN NOW() ELSE NULL END,
         updated_at = NOW()
        WHERE id = $5 AND workspace_id = $6 RETURNING *`,
       [status, title, dueDate, priority, id, workspaceId]
