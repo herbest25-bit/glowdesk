@@ -68,7 +68,7 @@ export async function startSession(channelId, workspaceId) {
     authStrategy: new RemoteAuth({
       clientId: channelId,
       store: makeStore(),
-      backupSyncIntervalMs: 60_000
+      backupSyncIntervalMs: 15_000
     }),
     puppeteer: {
       headless: true,
@@ -118,6 +118,27 @@ export async function startSession(channelId, workspaceId) {
         io.to(`workspace:${workspaceId}`).emit('channel_connected', { channelId, phone })
       }
       console.log(`[Channels] Canal conectado: ${channelId} → ${phone}`)
+
+      // Forçar backup da sessão após 20s (RemoteAuth cria o zip no intervalo de 15s)
+      setTimeout(async () => {
+        try {
+          const zipPath = `./${channelId}.zip`
+          if (fs.existsSync(zipPath)) {
+            const data = fs.readFileSync(zipPath).toString('base64')
+            await db.query(
+              `INSERT INTO channel_sessions (session_id, session_data, updated_at)
+               VALUES ($1, $2, NOW())
+               ON CONFLICT (session_id) DO UPDATE SET session_data = $2, updated_at = NOW()`,
+              [channelId, data]
+            )
+            console.log(`[Session] Backup forçado após ready: ${channelId}`)
+          } else {
+            console.log(`[Session] Zip ainda não criado em 20s: ${channelId}`)
+          }
+        } catch (e) {
+          console.error('[Session] Erro no backup forçado:', e.message)
+        }
+      }, 20_000)
     } catch (e) {
       console.error('[Channels] Erro ao salvar conexão:', e.message)
     }
