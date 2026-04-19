@@ -922,7 +922,17 @@ export default function InboxPage() {
               )}
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6 space-y-3">
+            <div className="flex-1 overflow-y-auto p-4 space-y-2" style={{ background: '#0d0d14' }}>
+              {noChannelActive && (
+                <div className="mx-auto max-w-sm mt-4 px-4 py-3 rounded-xl text-xs text-center" style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.25)', color: '#fca5a5' }}>
+                  ⚠️ WhatsApp desconectado. <a href="/channels" className="underline font-bold" style={{ color: '#f87171' }}>Reconectar em Canais →</a>
+                </div>
+              )}
+              {messages.length === 0 && (
+                <div className="flex items-center justify-center h-full text-xs" style={{ color: '#3a3a50' }}>
+                  Nenhuma mensagem ainda
+                </div>
+              )}
               {messages.filter(msg => !chatSearch || msg.content?.toLowerCase().includes(chatSearch.toLowerCase())).map(msg => (
                 <div key={msg.id} onClick={() => selectMode && toggleSelectMsg(msg.id)} className={`flex ${msg.direction === 'outbound' ? 'justify-end' : 'justify-start'} ${selectMode ? 'cursor-pointer' : ''} ${selectMode && selectedMsgs.has(msg.id) ? 'opacity-70' : ''}`}>
                   {selectMode && (
@@ -932,21 +942,28 @@ export default function InboxPage() {
                   )}
                   <div className={`max-w-[70%] rounded-2xl px-4 py-2.5 text-sm ${
                     msg.direction === 'inbound'
-                      ? 'bg-[#111118] border border-white/[0.06] text-slate-200 rounded-bl-sm'
+                      ? 'rounded-bl-sm'
                       : msg.sender_type === 'ai'
                       ? 'bg-violet-600 text-white rounded-br-sm'
-                      : 'bg-gray-800 text-white rounded-br-sm'
-                  }`}>
+                      : 'rounded-br-sm'
+                  }`} style={
+                    msg.direction === 'inbound'
+                      ? { background: '#1e1e2e', border: '1px solid rgba(255,255,255,0.08)', color: '#e2e2f0' }
+                      : msg.sender_type === 'ai'
+                      ? {}
+                      : { background: '#2d2d4a', color: '#e2e2f0' }
+                  }>
                     {msg.sender_type === 'ai' && (
                       <div className="text-xs text-violet-200 mb-1 flex items-center gap-1">
                         <Bot className="w-3 h-3" /> Glow
                       </div>
                     )}
                     {msg.sender_type === 'agent' && (
-                      <div className="text-xs text-slate-500 mb-1">{msg.sender_name || 'Agente'}</div>
+                      <div className="text-xs mb-1" style={{ color: 'rgba(255,255,255,0.4)' }}>{msg.sender_name || 'Agente'}</div>
                     )}
                     {msg.media_url && msg.content_type === 'image' && (
-                      <img src={msg.media_url} alt="imagem" className="max-w-xs rounded-lg mb-1" />
+                      <img src={msg.media_url} alt="imagem" className="max-w-xs rounded-lg mb-1"
+                        onError={e => { (e.target as HTMLImageElement).style.display='none' }} />
                     )}
                     {msg.media_url && msg.content_type === 'audio' && (
                       <audio controls src={msg.media_url} className="max-w-xs" />
@@ -983,6 +1000,12 @@ export default function InboxPage() {
                     {EMOJIS.map(e => (
                       <button key={e} onClick={() => { setNewMessage(m => m + e); setShowEmojiPicker(false) }} className="text-xl hover:scale-125 transition-transform leading-none p-0.5">{e}</button>
                     ))}
+                  </div>
+                )}
+                {noChannelActive && (
+                  <div className="mx-3 mb-1 text-xs px-3 py-2 rounded-lg flex items-center gap-2" style={{ background: 'rgba(239,68,68,0.12)', color: '#fca5a5', border: '1px solid rgba(239,68,68,0.25)' }}>
+                    <span>⚠️ WhatsApp desconectado.</span>
+                    <a href="/channels" className="underline font-bold" style={{ color: '#f87171' }}>Ir para Canais →</a>
                   </div>
                 )}
                 {sendError && (
