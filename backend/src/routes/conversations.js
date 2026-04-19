@@ -16,7 +16,7 @@ export async function conversationRoutes(fastify) {
     const { status, assignedTo, search, page = 1, limit = 30 } = req.query
     const offset = (page - 1) * limit
 
-    let where = ['c.workspace_id = $1']
+    let where = ['c.workspace_id = $1', "ct.phone NOT LIKE 'status%'", "COALESCE(ct.name,'') NOT ILIKE '%broadcast%'"]
     const params = [workspaceId]
     let i = 2
 
