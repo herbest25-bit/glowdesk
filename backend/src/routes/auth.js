@@ -6,58 +6,58 @@ const DEMO_PASSWORD = 'GlowDemo2025'
 const DEMO_WORKSPACE_SLUG = 'demo-glowdesk'
 
 async function ensureDemoAccount(fastify) {
-  // Upsert workspace
+  // 1. Upsert workspace
   const ws = await db.query(
     `INSERT INTO workspaces (name, slug, settings)
-     VALUES ('Demo GlowDesk', $1, '{"glow_active":true}')
+     VALUES ('Demo GlowDesk', $1, '{}')
      ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name
      RETURNING *`,
     [DEMO_WORKSPACE_SLUG]
   )
   const workspaceId = ws.rows[0].id
 
-  // Upsert user
+  // 2. Upsert user (always refresh hash so password is always valid)
   const hash = await bcrypt.hash(DEMO_PASSWORD, 10)
   const user = await db.query(
-    `INSERT INTO users (workspace_id, name, email, password_hash, role)
-     VALUES ($1, 'Demo Admin', $2, $3, 'admin')
-     ON CONFLICT (email) DO UPDATE SET workspace_id = $1, password_hash = $3
+    `INSERT INTO users (workspace_id, name, email, password_hash, role, status)
+     VALUES ($1, 'Demo', $2, $3, 'admin', 'active')
+     ON CONFLICT (email) DO UPDATE SET workspace_id = $1, password_hash = $3, status = 'active'
      RETURNING *`,
     [workspaceId, DEMO_EMAIL, hash]
   )
 
-  // Sample contacts (skip if already exist)
-  const contacts = [
-    { name: 'Ana Lima',     phone: '5511999110001' },
-    { name: 'Carla Mendes', phone: '5511999110002' },
-    { name: 'Julia Santos', phone: '5511999110003' },
-  ]
-  for (const c of contacts) {
-    await db.query(
-      `INSERT INTO contacts (workspace_id, name, phone)
-       VALUES ($1, $2, $3) ON CONFLICT (workspace_id, phone) DO NOTHING`,
-      [workspaceId, c.name, c.phone]
-    )
-  }
-
-  // Sample pipeline (only create if none exists)
-  const existingPipe = await db.query(`SELECT id FROM pipelines WHERE workspace_id = $1 LIMIT 1`, [workspaceId])
-  let pipelineId = existingPipe.rows[0]?.id
-  if (!pipelineId) {
-    const pipe = await db.query(
-      `INSERT INTO pipelines (workspace_id, name, is_default) VALUES ($1, 'Pipeline Demo', true) RETURNING id`,
-      [workspaceId]
-    )
-    pipelineId = pipe.rows[0].id
-    // Add default stages
-    const stages = ['Novo Lead', 'Qualificado', 'Proposta Enviada', 'Fechado']
-    for (let i = 0; i < stages.length; i++) {
+  // 3. Optional extras — don't fail if these break
+  try {
+    const contacts = [
+      { name: 'Ana Lima',     phone: '5511999110001' },
+      { name: 'Carla Mendes', phone: '5511999110002' },
+      { name: 'Julia Santos', phone: '5511999110003' },
+    ]
+    for (const c of contacts) {
       await db.query(
-        `INSERT INTO pipeline_stages (pipeline_id, name, position) VALUES ($1, $2, $3)`,
-        [pipelineId, stages[i], i]
+        `INSERT INTO contacts (workspace_id, name, phone)
+         VALUES ($1, $2, $3) ON CONFLICT (workspace_id, phone) DO NOTHING`,
+        [workspaceId, c.name, c.phone]
       )
     }
-  }
+  } catch (_) {}
+
+  try {
+    const existingPipe = await db.query(`SELECT id FROM pipelines WHERE workspace_id = $1 LIMIT 1`, [workspaceId])
+    if (!existingPipe.rows.length) {
+      const pipe = await db.query(
+        `INSERT INTO pipelines (workspace_id, name, is_default) VALUES ($1, 'Pipeline Demo', true) RETURNING id`,
+        [workspaceId]
+      )
+      const stages = ['Novo Lead', 'Qualificado', 'Proposta Enviada', 'Fechado']
+      for (let i = 0; i < stages.length; i++) {
+        await db.query(
+          `INSERT INTO pipeline_stages (pipeline_id, name, position) VALUES ($1, $2, $3)`,
+          [pipe.rows[0].id, stages[i], i]
+        )
+      }
+    }
+  } catch (_) {}
 
   return { workspaceId, user: user.rows[0] }
 }
@@ -126,7 +126,9 @@ export async function authRoutes(fastify) {
   // Acesso demo — cria conta demo e retorna token sem senha
   fastify.post('/auth/demo', async (req, reply) => {
     try {
+      console.log('[Demo] Iniciando...')
       const { workspaceId, user } = await ensureDemoAccount(fastify)
+      console.log('[Demo] Conta OK:', user.email, 'workspace:', workspaceId)
       const token = fastify.jwt.sign(
         { id: user.id, workspaceId, role: user.role },
         { expiresIn: '7d' }
@@ -136,8 +138,8 @@ export async function authRoutes(fastify) {
         user: { id: user.id, name: user.name, email: user.email, role: user.role, workspaceId }
       })
     } catch (e) {
-      console.error('[Demo] Erro:', e.message)
-      return reply.status(500).send({ error: 'Erro ao criar conta demo' })
+      console.error('[Demo] Erro detalhado:', e.message, e.stack)
+      return reply.status(500).send({ error: `Erro ao criar conta demo: ${e.message}` })
     }
   })
 
