@@ -72,6 +72,7 @@ export async function startSession(channelId, workspaceId) {
     }),
     puppeteer: {
       headless: true,
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
       protocolTimeout: 120000,
       args: [
         '--no-sandbox',
@@ -82,10 +83,7 @@ export async function startSession(channelId, workspaceId) {
         '--disable-extensions',
         '--disable-background-timer-throttling',
         '--disable-backgrounding-occluded-windows',
-        '--disable-renderer-backgrounding',
-        '--single-process',
-        '--disable-features=site-per-process',
-        '--js-flags=--max-old-space-size=256'
+        '--disable-renderer-backgrounding'
       ]
     }
   })
