@@ -97,6 +97,7 @@ export async function startSession(channelId, workspaceId) {
   }
 
   const { state, saveCreds } = await makeDBAuthState(channelId)
+  const sessionToken = Symbol() // token único para detectar sessão obsoleta
 
   const sock = makeWASocket({
     auth: state,
@@ -109,11 +110,10 @@ export async function startSession(channelId, workspaceId) {
     maxMsgRetryCount: 3
   })
 
-  // Wrapper com mesma interface do whatsapp-web.js
   const session = {
     sock,
+    sessionToken,
     async sendMessage(jid, content) {
-      // Converter @c.us → @s.whatsapp.net (formato Baileys para individuais)
       const baileysJid = jid.replace('@c.us', '@s.whatsapp.net')
       await sock.sendMessage(baileysJid, { text: content })
     },
@@ -135,6 +135,8 @@ export async function startSession(channelId, workspaceId) {
   sock.ev.on('creds.update', saveCreds)
 
   sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
+    // Ignorar eventos de sessão obsoleta (substituída por nova chamada a startSession)
+    if (sessions.get(channelId)?.sessionToken !== sessionToken) return
     // QR code gerado
     if (qr) {
       try {
@@ -180,11 +182,13 @@ export async function startSession(channelId, workspaceId) {
         const io = getIO()
         if (io) io.to(`workspace:${workspaceId}`).emit('channel_disconnected', { channelId })
       } else {
-        // Reconectar automaticamente após 5s
+        // Reconectar automaticamente após 5s (só se nenhuma sessão nova assumiu)
         setTimeout(() => {
-          startSession(channelId, workspaceId).catch(e =>
-            console.error('[Channels] Erro ao reconectar:', e.message)
-          )
+          if (!sessions.has(channelId)) {
+            startSession(channelId, workspaceId).catch(e =>
+              console.error('[Channels] Erro ao reconectar:', e.message)
+            )
+          }
         }, 5000)
       }
     }
