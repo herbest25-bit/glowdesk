@@ -98,6 +98,14 @@ try {
   `)
   console.log('[Migration] channel_sessions: OK')
 } catch (e) { console.log('[Migration] channel_sessions ERRO:', e.message) }
+try {
+  await db.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS whatsapp_message_id VARCHAR(255)`)
+  console.log('[Migration] messages.whatsapp_message_id: OK')
+} catch (e) { console.log('[Migration] messages.whatsapp_message_id ERRO:', e.message) }
+try {
+  await db.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_url TEXT`)
+  console.log('[Migration] messages.media_url: OK')
+} catch (e) { console.log('[Migration] messages.media_url ERRO:', e.message) }
 
 // ── Iniciar servidor ───────────────────────────────────────────
 const PORT = Number(process.env.PORT) || 3001

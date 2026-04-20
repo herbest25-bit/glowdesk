@@ -75,9 +75,20 @@ async function makeDBAuthState(channelId) {
 export async function initChannels() {
   try {
     const result = await db.query(
-      `SELECT id, workspace_id, name FROM channels WHERE status = 'connected'`
+      `SELECT id, workspace_id, name FROM channels WHERE status IN ('connected','connecting')`
     )
     for (const channel of result.rows) {
+      // Verificar se existe auth state Baileys salvo
+      const authRow = await db.query(
+        `SELECT session_id FROM channel_sessions WHERE session_id = $1`,
+        [`baileys-${channel.id}`]
+      )
+      if (!authRow.rows.length) {
+        // Sem auth state compatível — marcar como desconectado para forçar QR rescan
+        await db.query(`UPDATE channels SET status = 'disconnected', updated_at = NOW() WHERE id = $1`, [channel.id])
+        console.log(`[Channels] Canal ${channel.name}: sem auth Baileys, requer reconexão via QR`)
+        continue
+      }
       console.log(`[Channels] Reconectando canal: ${channel.name}`)
       await startSession(channel.id, channel.workspace_id).catch(e =>
         console.error(`[Channels] Erro ao reconectar ${channel.name}:`, e.message)
