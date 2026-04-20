@@ -1,5 +1,10 @@
 FROM node:20
 
+# Force git to use HTTPS instead of SSH — Railway has no SSH keys
+RUN git config --global url."https://github.com/".insteadOf git+ssh://git@github.com/ && \
+    git config --global url."https://github.com/".insteadOf ssh://git@github.com/ && \
+    git config --global url."https://github.com/".insteadOf git://github.com/
+
 WORKDIR /app
 
 COPY package.json ./
