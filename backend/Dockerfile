@@ -1,15 +1,9 @@
-FROM node:20-slim
-
-RUN apt-get update && apt-get install -y \
-    libnss3 libatk1.0-0 libatk-bridge2.0-0 \
-    python3 make g++ git \
-    --no-install-recommends \
-    && rm -rf /var/lib/apt/lists/*
+FROM node:20
 
 WORKDIR /app
 
 COPY package.json ./
-RUN npm install --production --ignore-scripts=false
+RUN npm install --production
 
 COPY src ./src
 
