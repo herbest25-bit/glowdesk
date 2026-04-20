@@ -1,17 +1,15 @@
 FROM node:20-slim
 
 RUN apt-get update && apt-get install -y \
-    libnss3 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
+    libnss3 libatk1.0-0 libatk-bridge2.0-0 \
+    python3 make g++ \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy only backend package.json — never the root monorepo lockfile
 COPY package.json ./
-RUN npm install --production --no-package-lock
+RUN npm install --production --ignore-scripts=false
 
 COPY src ./src
 
