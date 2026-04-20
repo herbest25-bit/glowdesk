@@ -1,5 +1,4 @@
-import baileysPkg from '@whiskeysockets/baileys'
-const { default: makeWASocket, DisconnectReason, initAuthCreds, BufferJSON, downloadMediaMessage } = baileysPkg
+import makeWASocket, { DisconnectReason, initAuthCreds, BufferJSON, downloadMediaMessage } from '@whiskeysockets/baileys'
 import qrcode from 'qrcode'
 import { db } from '../utils/db.js'
 import { getIO } from './realtime.js'
