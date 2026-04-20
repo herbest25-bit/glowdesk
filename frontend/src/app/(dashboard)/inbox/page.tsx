@@ -429,31 +429,17 @@ export default function InboxPage() {
     api.get('/api/channels/sessions').then(async (d: any) => {
       const inactive = !d.activeSessions || d.activeSessions.length === 0
       setNoChannelActive(inactive)
-      if (!inactive) return
-
-      // Buscar canal e abrir QR automaticamente
-      try {
-        const ch = await api.get('/api/channels') as any
-        const channel = ch.channels?.[0]
-        if (!channel) return
-
-        setConnectChannelId(channel.id)
-        connectChannelIdRef.current = channel.id
-        setShowConnectModal(true)
-        setConnectQR(null)
-
-        // Disparar geração do QR
-        await api.get(`/api/channels/${channel.id}/qrcode`)
-
-        // Polling HTTP fallback
-        const poll = setInterval(async () => {
-          try {
-            const qd = await api.get(`/api/channels/${channel.id}/qr-poll`) as any
-            if (qd.qrcode) { setConnectQR(qd.qrcode); clearInterval(poll) }
-          } catch {}
-        }, 2000)
-        setTimeout(() => clearInterval(poll), 120_000)
-      } catch {}
+      // Load first channel id for the connect button (no auto-open modal)
+      if (inactive) {
+        try {
+          const ch = await api.get('/api/channels') as any
+          const channel = ch.channels?.[0]
+          if (channel) {
+            setConnectChannelId(channel.id)
+            connectChannelIdRef.current = channel.id
+          }
+        } catch {}
+      }
     }).catch(() => {})
   }, [])
 
