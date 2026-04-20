@@ -1,11 +1,18 @@
-import { makeWASocket, DisconnectReason, initAuthCreds, BufferJSON, downloadMediaMessage } from '@whiskeysockets/baileys'
+import baileysPkg from '@whiskeysockets/baileys'
+const { default: makeWASocket, DisconnectReason, initAuthCreds, BufferJSON, downloadMediaMessage } = baileysPkg
 import qrcode from 'qrcode'
 import { db } from '../utils/db.js'
 import { getIO } from './realtime.js'
-import pino from 'pino'
 
-const sessions = new Map() // channelId → session wrapper
-const logger = pino({ level: 'silent' })
+const sessions = new Map() // channelId → { sock, connected, sendMessage, sendMedia }
+const connectedSessions = new Set() // só sessões realmente abertas
+
+const logger = {
+  level: 'silent',
+  trace: () => {}, debug: () => {}, info: () => {},
+  warn: () => {}, error: () => {}, fatal: () => {},
+  child: function() { return this }
+}
 
 // ─── Auth state persistido no banco ──────────────────────────────────────────
 async function makeDBAuthState(channelId) {
@@ -143,6 +150,7 @@ export async function startSession(channelId, workspaceId) {
 
     // Conectado
     if (connection === 'open') {
+      connectedSessions.add(channelId)
       try {
         const phone = sock.user?.id?.split('@')[0]?.split(':')[0] || null
         await db.query(
@@ -164,6 +172,7 @@ export async function startSession(channelId, workspaceId) {
       const loggedOut = code === DisconnectReason.loggedOut
       console.log(`[Channels] Desconectado: ${channelId}, code: ${code}, loggedOut: ${loggedOut}`)
 
+      connectedSessions.delete(channelId)
       sessions.delete(channelId)
 
       if (loggedOut) {
@@ -333,7 +342,7 @@ export function getSession(channelId) {
   return sessions.get(channelId) || null
 }
 
-// ─── Listar sessões ativas ────────────────────────────────────────────────────
+// ─── Listar sessões ativas (somente conectadas) ───────────────────────────────
 export function getSessions() {
-  return Array.from(sessions.keys())
+  return Array.from(connectedSessions)
 }
