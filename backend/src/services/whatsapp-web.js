@@ -253,7 +253,7 @@ export async function startSession(channelId, workspaceId) {
           else if (m.stickerMessage)  contentType = 'sticker'
 
           try {
-            const buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger, reuploadRequest: sock.updateMediaMessage })
+            const buffer = await downloadMediaMessage(msg, 'buffer', {})
             const mime = m.imageMessage?.mimetype || m.videoMessage?.mimetype || m.audioMessage?.mimetype || m.pttMessage?.mimetype || m.documentMessage?.mimetype || 'application/octet-stream'
             mediaUrl = `data:${mime};base64,${buffer.toString('base64')}`
           } catch (e) {
