@@ -1,5 +1,5 @@
 import { db } from '../utils/db.js'
-import { startSession, destroySession, getSessions } from '../services/whatsapp-web.js'
+import { startSession, destroySession, getSessions, getPendingQR } from '../services/whatsapp-web.js'
 
 export default async function channelsRoutes(fastify) {
   // GET /api/channels — listar canais
@@ -61,6 +61,13 @@ export default async function channelsRoutes(fastify) {
     })
 
     return { status: 'starting' }
+  })
+
+  // GET /api/channels/:id/qr-poll — polling HTTP para QR code (fallback ao socket)
+  fastify.get('/api/channels/:id/qr-poll', async (req, reply) => {
+    const { id } = req.params
+    const qr = getPendingQR(id)
+    return { qrcode: qr }
   })
 
   // GET /api/channels/:id/status — verificar status

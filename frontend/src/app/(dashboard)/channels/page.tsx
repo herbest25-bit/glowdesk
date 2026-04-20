@@ -89,17 +89,33 @@ export default function ChannelsPage() {
   useEffect(() => {
     if (step !== 'qrcode') return
     setQrTimeout(false)
+
+    // Polling HTTP como fallback caso socket não entregue o QR
+    const pollInterval = setInterval(async () => {
+      if (qrCode || !creatingIdRef.current) return
+      try {
+        const d = await api.get(`/api/channels/${creatingIdRef.current}/qr-poll`) as any
+        if (d.qrcode) {
+          setQrCode(d.qrcode)
+          setQrExpiry(60)
+          setRefreshing(false)
+          setStartError(null)
+        }
+      } catch {}
+    }, 3000)
+
     // Timeout de 90s: se QR não aparecer, mostrar erro
     const timeoutId = setTimeout(() => {
       if (!qrCode) setQrTimeout(true)
     }, 90_000)
+
     const t = setInterval(() => {
       setQrExpiry(e => {
         if (e <= 1) { refreshQr(); return 60 }
         return e - 1
       })
     }, 1000)
-    return () => { clearInterval(t); clearTimeout(timeoutId) }
+    return () => { clearInterval(t); clearTimeout(timeoutId); clearInterval(pollInterval) }
   }, [step])
 
   async function startChannel() {

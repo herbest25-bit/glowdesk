@@ -1,10 +1,21 @@
-import makeWASocket, { DisconnectReason, initAuthCreds, BufferJSON, downloadMediaMessage } from '@whiskeysockets/baileys'
+import * as BaileysPkg from '@whiskeysockets/baileys'
 import qrcode from 'qrcode'
 import { db } from '../utils/db.js'
 import { getIO } from './realtime.js'
 
-const sessions = new Map() // channelId → { sock, connected, sendMessage, sendMedia }
+const makeWASocket       = BaileysPkg.default || BaileysPkg.makeWASocket
+const DisconnectReason   = BaileysPkg.DisconnectReason
+const initAuthCreds      = BaileysPkg.initAuthCreds
+const BufferJSON         = BaileysPkg.BufferJSON
+const downloadMediaMessage = BaileysPkg.downloadMediaMessage
+
+console.log('[Baileys] makeWASocket type:', typeof makeWASocket)
+console.log('[Baileys] DisconnectReason:', !!DisconnectReason)
+console.log('[Baileys] initAuthCreds:', typeof initAuthCreds)
+
+const sessions = new Map() // channelId → { sock, sessionToken, sendMessage, sendMedia }
 const connectedSessions = new Set() // só sessões realmente abertas
+const pendingQRCodes = new Map() // channelId → qrDataUrl (para polling HTTP)
 
 const logger = {
   level: 'silent',
@@ -152,9 +163,11 @@ export async function startSession(channelId, workspaceId) {
     if (qr) {
       try {
         const qrDataUrl = await qrcode.toDataURL(qr)
+        pendingQRCodes.set(channelId, qrDataUrl) // armazenar para polling HTTP
         const io = getIO()
         if (io) io.to(`workspace:${workspaceId}`).emit('channel_qrcode', { channelId, qrcode: qrDataUrl })
         await db.query(`UPDATE channels SET status = 'connecting', updated_at = NOW() WHERE id = $1`, [channelId])
+        console.log(`[Channels] QR gerado para canal ${channelId}`)
       } catch (e) {
         console.error('[Channels] Erro ao gerar QR:', e.message)
       }
@@ -162,6 +175,7 @@ export async function startSession(channelId, workspaceId) {
 
     // Conectado
     if (connection === 'open') {
+      pendingQRCodes.delete(channelId) // QR não é mais necessário
       connectedSessions.add(channelId)
       try {
         const phone = sock.user?.id?.split('@')[0]?.split(':')[0] || null
@@ -359,4 +373,9 @@ export function getSession(channelId) {
 // ─── Listar sessões ativas (somente conectadas) ───────────────────────────────
 export function getSessions() {
   return Array.from(connectedSessions)
+}
+
+// ─── QR code pendente (polling HTTP fallback) ─────────────────────────────────
+export function getPendingQR(channelId) {
+  return pendingQRCodes.get(channelId) || null
 }
