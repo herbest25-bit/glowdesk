@@ -400,6 +400,10 @@ export default function InboxPage() {
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState('')
   const [noChannelActive, setNoChannelActive] = useState(false)
+  const [showConnectModal, setShowConnectModal] = useState(false)
+  const [connectQR, setConnectQR] = useState<string | null>(null)
+  const [connectChannelId, setConnectChannelId] = useState<string | null>(null)
+  const connectChannelIdRef = useRef<string | null>(null)
   const [view, setView] = useState<'list' | 'kanban'>('list')
   const [showNewConv, setShowNewConv] = useState(false)
   const [bantData, setBantData] = useState<BantData | null>(null)
@@ -422,9 +426,20 @@ export default function InboxPage() {
     : {}
 
   useEffect(() => {
-    // Verificar se há canais ativos em memória
     api.get('/api/channels/sessions').then((d: any) => {
-      setNoChannelActive(!d.activeSessions || d.activeSessions.length === 0)
+      const inactive = !d.activeSessions || d.activeSessions.length === 0
+      setNoChannelActive(inactive)
+      if (inactive) {
+        // Pré-carregar canal desconectado para reconexão inline
+        api.get('/api/channels').then((ch: any) => {
+          const disconnected = ch.channels?.find((c: any) => c.status !== 'connected')
+            || ch.channels?.[0]
+          if (disconnected) {
+            setConnectChannelId(disconnected.id)
+            connectChannelIdRef.current = disconnected.id
+          }
+        }).catch(() => {})
+      }
     }).catch(() => {})
   }, [])
 
@@ -448,7 +463,16 @@ export default function InboxPage() {
     })
     socket.on('conversation_updated', () => loadConversations())
     socket.on('transfer_to_human', () => loadConversations())
-    socket.on('channel_connected', () => setNoChannelActive(false))
+    socket.on('channel_qrcode', ({ channelId, qrcode }: any) => {
+      if (channelId === connectChannelIdRef.current) {
+        setConnectQR(qrcode)
+      }
+    })
+    socket.on('channel_connected', () => {
+      setNoChannelActive(false)
+      setShowConnectModal(false)
+      setConnectQR(null)
+    })
     socket.on('channel_disconnected', () => {
       api.get('/api/channels/sessions').then((d: any) => {
         setNoChannelActive(!d.activeSessions || d.activeSessions.length === 0)
@@ -458,6 +482,7 @@ export default function InboxPage() {
       socket.off('new_message')
       socket.off('conversation_updated')
       socket.off('transfer_to_human')
+      socket.off('channel_qrcode')
       socket.off('channel_connected')
       socket.off('channel_disconnected')
     }
@@ -732,6 +757,34 @@ export default function InboxPage() {
   // ── List View ────────────────────────────────────────────────
   return (
     <div className="flex h-screen">
+      {showConnectModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+          onClick={() => setShowConnectModal(false)}>
+          <div className="rounded-2xl w-full max-w-sm mx-4 p-6 text-center space-y-4"
+            style={{ background: '#16161f', border: '1px solid rgba(255,255,255,0.08)' }}
+            onClick={e => e.stopPropagation()}>
+            <h2 className="font-semibold" style={{ color: '#e8e8f2' }}>Conectar WhatsApp</h2>
+            <p className="text-xs" style={{ color: '#8b8b9e' }}>
+              Abra o WhatsApp → <strong style={{ color: '#e8e8f2' }}>Aparelhos Conectados</strong> → <strong style={{ color: '#e8e8f2' }}>Conectar aparelho</strong> → escaneie:
+            </p>
+            <div className="flex items-center justify-center">
+              {connectQR ? (
+                <img src={connectQR} alt="QR Code" className="w-52 h-52 rounded-xl"
+                  style={{ border: '1px solid rgba(255,255,255,0.08)' }} />
+              ) : (
+                <div className="w-52 h-52 rounded-xl flex flex-col items-center justify-center gap-3"
+                  style={{ border: '2px dashed rgba(124,58,237,0.3)', background: 'rgba(124,58,237,0.06)' }}>
+                  <div className="w-8 h-8 border-violet-500 border-t-transparent rounded-full animate-spin" style={{ borderWidth: 3, borderStyle: 'solid' }} />
+                  <p className="text-xs" style={{ color: '#c4b5fd' }}>Gerando QR Code...</p>
+                  <p className="text-[10px]" style={{ color: '#8b6fba' }}>Aguarde ~30 segundos</p>
+                </div>
+              )}
+            </div>
+            <button onClick={() => setShowConnectModal(false)} className="btn-secondary text-xs w-full">Fechar</button>
+          </div>
+        </div>
+      )}
+
       {showNewConv && (
         <NewConversationModal
           onClose={() => setShowNewConv(false)}
@@ -775,10 +828,29 @@ export default function InboxPage() {
         </div>
 
         {noChannelActive && (
-          <div className="mx-3 mt-2 px-3 py-2.5 rounded-xl text-xs flex items-start gap-2" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#fca5a5' }}>
-            <span className="flex-shrink-0 mt-0.5">⚠️</span>
-            <span>Nenhum canal WhatsApp conectado. <a href="/channels" className="underline font-semibold" style={{ color: '#f87171' }}>Vá em Canais</a> e reconecte para enviar e receber mensagens.</span>
-          </div>
+          <button
+            onClick={async () => {
+              setShowConnectModal(true)
+              setConnectQR(null)
+              if (connectChannelIdRef.current) {
+                try { await api.get(`/api/channels/${connectChannelIdRef.current}/qrcode`) } catch {}
+                // Polling HTTP fallback
+                const poll = setInterval(async () => {
+                  try {
+                    const d = await api.get(`/api/channels/${connectChannelIdRef.current}/qr-poll`) as any
+                    if (d.qrcode) { setConnectQR(d.qrcode); clearInterval(poll) }
+                  } catch {}
+                }, 3000)
+                setTimeout(() => clearInterval(poll), 120_000)
+              }
+            }}
+            className="mx-3 mt-2 w-[calc(100%-24px)] px-3 py-2.5 rounded-xl text-xs flex items-center gap-2 cursor-pointer transition-all hover:opacity-90"
+            style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', color: '#fca5a5' }}
+          >
+            <span className="flex-shrink-0">⚠️</span>
+            <span className="flex-1 text-left">WhatsApp desconectado.</span>
+            <span className="font-bold underline" style={{ color: '#f87171' }}>Conectar agora →</span>
+          </button>
         )}
 
         <MeetingNotifBanner />

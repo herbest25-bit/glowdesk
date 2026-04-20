@@ -53,38 +53,44 @@ export default function ChannelsPage() {
     }
   }, [])
 
+  const channelNameRef = useRef(channelName)
+  useEffect(() => { channelNameRef.current = channelName }, [channelName])
+
   useEffect(() => {
     load()
     const user = typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('user') || '{}') : {}
     const socket = getSocket(user.workspaceId)
-    socket.on('channel_qrcode', ({ channelId, qrcode }: { channelId: string; qrcode: string }) => {
-      if (channelId === creatingIdRef.current) {
-        setQrCode(qrcode)
-        setQrExpiry(60)
-        setRefreshing(false)
-        setStartError(null)
-      }
-    })
-    socket.on('channel_connected', ({ channelId, phone }: { channelId: string; phone: string }) => {
-      if (channelId === creatingIdRef.current) {
-        setConnectedChannel({ id: channelId, name: channelName, phone_number: phone, status: 'connected', connected_at: new Date().toISOString(), created_at: new Date().toISOString() })
-        setStep('done')
-        load()
-      }
-    })
-    socket.on('channel_error', ({ channelId, error }: { channelId: string; error: string }) => {
-      if (channelId === creatingIdRef.current) {
-        setStartError(`Falha ao iniciar: ${error}. Tente novamente.`)
-        setStep('name')
-        load()
-      }
-    })
-    return () => {
-      socket.off('channel_qrcode')
-      socket.off('channel_connected')
-      socket.off('channel_error')
+
+    // Handlers usam refs para evitar re-registro (que causa janela de perda de evento)
+    function onQR({ channelId, qrcode }: { channelId: string; qrcode: string }) {
+      console.log('[Socket] channel_qrcode recebido, channelId:', channelId, 'esperado:', creatingIdRef.current)
+      setQrCode(qrcode)
+      setQrExpiry(60)
+      setRefreshing(false)
+      setStartError(null)
     }
-  }, [creatingId, channelName, load])
+    function onConnected({ channelId, phone }: { channelId: string; phone: string }) {
+      if (channelId !== creatingIdRef.current) return
+      setConnectedChannel({ id: channelId, name: channelNameRef.current, phone_number: phone, status: 'connected', connected_at: new Date().toISOString(), created_at: new Date().toISOString() })
+      setStep('done')
+      load()
+    }
+    function onError({ channelId, error }: { channelId: string; error: string }) {
+      if (channelId !== creatingIdRef.current) return
+      setStartError(`Falha ao iniciar: ${error}. Tente novamente.`)
+      setStep('name')
+      load()
+    }
+
+    socket.on('channel_qrcode', onQR)
+    socket.on('channel_connected', onConnected)
+    socket.on('channel_error', onError)
+    return () => {
+      socket.off('channel_qrcode', onQR)
+      socket.off('channel_connected', onConnected)
+      socket.off('channel_error', onError)
+    }
+  }, [load])
 
   useEffect(() => {
     if (step !== 'qrcode') return
