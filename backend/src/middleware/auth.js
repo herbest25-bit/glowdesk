@@ -2,7 +2,7 @@ import { db } from '../utils/db.js'
 
 export async function authMiddleware(fastify) {
   fastify.addHook('preHandler', async (req, reply) => {
-    const publicPaths = ['/webhook', '/auth/login', '/auth/register', '/health']
+    const publicPaths = ['/webhook', '/auth/login', '/auth/register', '/auth/demo', '/health']
     if (publicPaths.some(p => req.url.startsWith(p))) return
 
     try {

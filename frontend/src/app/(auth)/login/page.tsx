@@ -9,6 +9,22 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [demoLoading, setDemoLoading] = useState(false)
+
+  async function handleDemo() {
+    setDemoLoading(true)
+    setError('')
+    try {
+      const data = await api.post('/auth/demo', {})
+      localStorage.setItem('token', data.token)
+      localStorage.setItem('user', JSON.stringify(data.user))
+      router.push('/overview')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Erro ao acessar demo')
+    } finally {
+      setDemoLoading(false)
+    }
+  }
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
@@ -152,6 +168,40 @@ export default function LoginPage() {
                 ) : 'Entrar'}
               </button>
             </form>
+
+            <div className="relative my-5">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t" style={{ borderColor: 'rgba(255,255,255,0.07)' }} />
+              </div>
+              <div className="relative flex justify-center text-xs">
+                <span className="px-3" style={{ background: '#111118', color: '#3a3a50' }}>ou</span>
+              </div>
+            </div>
+
+            <button
+              onClick={handleDemo}
+              disabled={demoLoading}
+              className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2"
+              style={{
+                background: 'linear-gradient(135deg, rgba(124,58,237,0.15), rgba(244,63,94,0.15))',
+                border: '1px solid rgba(124,58,237,0.35)',
+                color: '#c4b5fd',
+              }}
+              onMouseEnter={e => (e.currentTarget as HTMLElement).style.borderColor = 'rgba(124,58,237,0.7)'}
+              onMouseLeave={e => (e.currentTarget as HTMLElement).style.borderColor = 'rgba(124,58,237,0.35)'}
+            >
+              {demoLoading ? (
+                <span className="flex items-center gap-2">
+                  <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                  </svg>
+                  Carregando demo...
+                </span>
+              ) : (
+                <>✨ Acessar Demo gratuitamente</>
+              )}
+            </button>
           </div>
 
           <p className="text-center text-xs mt-6" style={{ color: '#3a3a50' }}>
