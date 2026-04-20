@@ -68,7 +68,7 @@ export async function startSession(channelId, workspaceId) {
     authStrategy: new RemoteAuth({
       clientId: channelId,
       store: makeStore(),
-      backupSyncIntervalMs: 15_000
+      backupSyncIntervalMs: 60_000
     }),
     puppeteer: {
       headless: true,
