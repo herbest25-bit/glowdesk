@@ -40,6 +40,7 @@ export default function ChannelsPage() {
   const [starting, setStarting] = useState(false)
   const creatingIdRef = useRef<string | null>(null)
   const [reconnectingId, setReconnectingId] = useState<string | null>(null)
+  const [qrTimeout, setQrTimeout] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -61,6 +62,7 @@ export default function ChannelsPage() {
         setQrCode(qrcode)
         setQrExpiry(60)
         setRefreshing(false)
+        setStartError(null)
       }
     })
     socket.on('channel_connected', ({ channelId, phone }: { channelId: string; phone: string }) => {
@@ -70,21 +72,34 @@ export default function ChannelsPage() {
         load()
       }
     })
+    socket.on('channel_error', ({ channelId, error }: { channelId: string; error: string }) => {
+      if (channelId === creatingIdRef.current) {
+        setStartError(`Falha ao iniciar: ${error}. Tente novamente.`)
+        setStep('name')
+        load()
+      }
+    })
     return () => {
       socket.off('channel_qrcode')
       socket.off('channel_connected')
+      socket.off('channel_error')
     }
   }, [creatingId, channelName, load])
 
   useEffect(() => {
     if (step !== 'qrcode') return
+    setQrTimeout(false)
+    // Timeout de 90s: se QR não aparecer, mostrar erro
+    const timeoutId = setTimeout(() => {
+      if (!qrCode) setQrTimeout(true)
+    }, 90_000)
     const t = setInterval(() => {
       setQrExpiry(e => {
         if (e <= 1) { refreshQr(); return 60 }
         return e - 1
       })
     }, 1000)
-    return () => clearInterval(t)
+    return () => { clearInterval(t); clearTimeout(timeoutId) }
   }, [step])
 
   async function startChannel() {
@@ -379,7 +394,16 @@ export default function ChannelsPage() {
                 </p>
 
                 <div className="flex items-center justify-center">
-                  {qrCode ? (
+                  {qrTimeout && !qrCode ? (
+                    <div className="w-52 h-52 rounded-xl flex flex-col items-center justify-center gap-3 text-center px-4"
+                      style={{ border: '2px dashed rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.06)' }}>
+                      <p className="text-sm font-medium" style={{ color: '#fca5a5' }}>Falha ao iniciar</p>
+                      <p className="text-xs" style={{ color: '#8b6fba' }}>O servidor demorou demais. Tente novamente.</p>
+                      <button onClick={refreshQr} className="text-xs px-3 py-1.5 rounded-lg" style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171' }}>
+                        Tentar novamente
+                      </button>
+                    </div>
+                  ) : qrCode ? (
                     <div className="relative">
                       <img src={qrCode} alt="QR Code" className="w-52 h-52 rounded-xl" style={{ border: '1px solid rgba(255,255,255,0.08)' }} />
                       <div

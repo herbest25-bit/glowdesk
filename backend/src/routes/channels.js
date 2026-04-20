@@ -50,9 +50,15 @@ export default async function channelsRoutes(fastify) {
     if (!result.rows.length) return reply.code(404).send({ error: 'Canal não encontrado' })
 
     // Iniciar sessão em background (QR chega via socket)
-    startSession(id, workspaceId).catch(e =>
+    startSession(id, workspaceId).catch(async (e) => {
       console.error('[Channels] Erro ao iniciar sessão:', e.message)
-    )
+      const { getIO } = await import('../services/realtime.js')
+      const io = getIO()
+      if (io) {
+        io.to(`workspace:${workspaceId}`).emit('channel_error', { channelId: id, error: e.message })
+      }
+      await db.query(`UPDATE channels SET status = 'disconnected', updated_at = NOW() WHERE id = $1`, [id])
+    })
 
     return { status: 'starting' }
   })

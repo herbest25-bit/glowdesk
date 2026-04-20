@@ -82,7 +82,10 @@ export async function startSession(channelId, workspaceId) {
         '--disable-extensions',
         '--disable-background-timer-throttling',
         '--disable-backgrounding-occluded-windows',
-        '--disable-renderer-backgrounding'
+        '--disable-renderer-backgrounding',
+        '--single-process',
+        '--disable-features=site-per-process',
+        '--js-flags=--max-old-space-size=256'
       ]
     }
   })
