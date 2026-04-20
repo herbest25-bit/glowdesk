@@ -2,6 +2,7 @@ import 'dotenv/config'
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import jwt from '@fastify/jwt'
+import bcrypt from 'bcryptjs'
 
 import { authRoutes } from './routes/auth.js'
 import { conversationRoutes } from './routes/conversations.js'
@@ -117,6 +118,23 @@ try {
   `)
   console.log('[Migration] channel_sessions key rename: OK')
 } catch (e) { console.log('[Migration] channel_sessions rename ERRO:', e.message) }
+
+// ── Corrigir hashes SHA256 → bcrypt e garantir admin ──────────
+try {
+  // Usuários com hash não-bcrypt (SHA256 do create-admin.js antigo)
+  const badHashes = await db.query(
+    `SELECT id, email FROM users WHERE password_hash NOT LIKE '$2%'`
+  )
+  if (badHashes.rows.length) {
+    const newPass  = process.env.ADMIN_DEFAULT_PASSWORD || 'GlowDesk2025!'
+    const newHash  = await bcrypt.hash(newPass, 10)
+    for (const u of badHashes.rows) {
+      await db.query(`UPDATE users SET password_hash = $1 WHERE id = $2`, [newHash, u.id])
+    }
+    console.log(`[Migration] Senha de ${badHashes.rows.length} usuário(s) resetada → ${newPass}`)
+    console.log('[Migration] Emails afetados:', badHashes.rows.map(u => u.email).join(', '))
+  }
+} catch (e) { console.log('[Migration] fix-hashes ERRO:', e.message) }
 
 // ── Iniciar servidor ───────────────────────────────────────────
 const PORT = Number(process.env.PORT) || 3001
