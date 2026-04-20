@@ -106,6 +106,17 @@ try {
   await db.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_url TEXT`)
   console.log('[Migration] messages.media_url: OK')
 } catch (e) { console.log('[Migration] messages.media_url ERRO:', e.message) }
+try {
+  // Migrar chave de sessão baileys-{id} → wab-{id}
+  await db.query(`
+    INSERT INTO channel_sessions (session_id, session_data, updated_at)
+    SELECT REPLACE(session_id, 'baileys-', 'wab-'), session_data, NOW()
+    FROM channel_sessions
+    WHERE session_id LIKE 'baileys-%'
+    ON CONFLICT (session_id) DO NOTHING
+  `)
+  console.log('[Migration] channel_sessions key rename: OK')
+} catch (e) { console.log('[Migration] channel_sessions rename ERRO:', e.message) }
 
 // ── Iniciar servidor ───────────────────────────────────────────
 const PORT = Number(process.env.PORT) || 3001

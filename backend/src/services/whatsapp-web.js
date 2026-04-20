@@ -9,212 +9,193 @@ const initAuthCreds      = BaileysPkg.initAuthCreds
 const BufferJSON         = BaileysPkg.BufferJSON
 const downloadMediaMessage = BaileysPkg.downloadMediaMessage
 
-console.log('[Baileys] makeWASocket type:', typeof makeWASocket)
-console.log('[Baileys] DisconnectReason:', !!DisconnectReason)
-console.log('[Baileys] initAuthCreds:', typeof initAuthCreds)
+console.log('[Baileys] makeWASocket:', typeof makeWASocket)
 
-const sessions = new Map() // channelId → { sock, sessionToken, sendMessage, sendMedia }
-const connectedSessions = new Set() // só sessões realmente abertas
-const pendingQRCodes = new Map() // channelId → qrDataUrl (para polling HTTP)
+// ─── Estado em memória ────────────────────────────────────────────────────────
+const sessions    = new Map()   // channelId → session object
+const connected   = new Set()   // channelId de sessões abertas
+const pendingQR   = new Map()   // channelId → qrDataUrl
 
 const logger = {
   level: 'silent',
-  trace: () => {}, debug: () => {}, info: () => {},
-  warn: () => {}, error: () => {}, fatal: () => {},
-  child: function() { return this }
+  trace:()=>{}, debug:()=>{}, info:()=>{},
+  warn:()=>{}, error:()=>{}, fatal:()=>{},
+  child() { return this }
 }
 
-// ─── Auth state persistido no banco ──────────────────────────────────────────
-async function makeDBAuthState(channelId) {
+// ─── Auth persistida no banco ─────────────────────────────────────────────────
+async function loadAuth(channelId) {
   const row = await db.query(
     'SELECT session_data FROM channel_sessions WHERE session_id = $1',
-    [`baileys-${channelId}`]
+    [`wab-${channelId}`]
   )
-
   let creds = initAuthCreds()
-  let keys = {}
-
-  if (row.rows.length > 0 && row.rows[0].session_data) {
+  let keys  = {}
+  if (row.rows[0]?.session_data) {
     try {
-      const parsed = JSON.parse(row.rows[0].session_data, BufferJSON.reviver)
-      if (parsed.creds) creds = parsed.creds
-      if (parsed.keys) keys = parsed.keys
-    } catch (e) {
-      console.error('[Baileys] Erro ao carregar auth state:', e.message)
-    }
+      const p = JSON.parse(row.rows[0].session_data, BufferJSON.reviver)
+      if (p.creds) creds = p.creds
+      if (p.keys)  keys  = p.keys
+    } catch {}
   }
-
-  const saveCreds = async () => {
+  const save = async () => {
     const data = JSON.stringify({ creds, keys }, BufferJSON.replacer)
     await db.query(
       `INSERT INTO channel_sessions (session_id, session_data, updated_at)
-       VALUES ($1, $2, NOW())
-       ON CONFLICT (session_id) DO UPDATE SET session_data = $2, updated_at = NOW()`,
-      [`baileys-${channelId}`, data]
+       VALUES ($1,$2,NOW())
+       ON CONFLICT (session_id) DO UPDATE SET session_data=$2, updated_at=NOW()`,
+      [`wab-${channelId}`, data]
     )
   }
-
   return {
     state: {
       creds,
       keys: {
         get: (type, ids) => {
-          const data = {}
-          for (const id of ids) {
-            const value = keys[`${type}-${id}`]
-            if (value) data[id] = value
-          }
-          return data
+          const out = {}
+          for (const id of ids) { const v = keys[`${type}-${id}`]; if (v) out[id] = v }
+          return out
         },
         set: (data) => {
-          for (const category in data) {
-            for (const id in data[category]) {
-              const value = data[category][id]
-              if (value) keys[`${category}-${id}`] = value
-              else delete keys[`${category}-${id}`]
+          for (const cat in data)
+            for (const id in data[cat]) {
+              const v = data[cat][id]
+              if (v) keys[`${cat}-${id}`] = v
+              else   delete keys[`${cat}-${id}`]
             }
-          }
-          saveCreds().catch(e => console.error('[Baileys] Erro ao salvar keys:', e.message))
+          save().catch(e => console.error('[WA] save keys error:', e.message))
         }
       }
     },
-    saveCreds
+    save
   }
 }
 
-// ─── Inicializar canais ao subir o servidor ───────────────────────────────────
+// ─── Inicializar todos os canais salvos ───────────────────────────────────────
 export async function initChannels() {
   try {
-    const result = await db.query(
+    const { rows } = await db.query(
       `SELECT id, workspace_id, name FROM channels WHERE status IN ('connected','connecting')`
     )
-    for (const channel of result.rows) {
-      // Verificar se existe auth state Baileys salvo
-      const authRow = await db.query(
+    for (const ch of rows) {
+      const auth = await db.query(
         `SELECT session_id FROM channel_sessions WHERE session_id = $1`,
-        [`baileys-${channel.id}`]
+        [`wab-${ch.id}`]
       )
-      if (!authRow.rows.length) {
-        // Sem auth state compatível — marcar como desconectado para forçar QR rescan
-        await db.query(`UPDATE channels SET status = 'disconnected', updated_at = NOW() WHERE id = $1`, [channel.id])
-        console.log(`[Channels] Canal ${channel.name}: sem auth Baileys, requer reconexão via QR`)
+      if (!auth.rows.length) {
+        await db.query(`UPDATE channels SET status='disconnected', updated_at=NOW() WHERE id=$1`, [ch.id])
+        console.log(`[WA] ${ch.name}: sem credenciais, aguardando QR`)
         continue
       }
-      console.log(`[Channels] Reconectando canal: ${channel.name}`)
-      await startSession(channel.id, channel.workspace_id).catch(e =>
-        console.error(`[Channels] Erro ao reconectar ${channel.name}:`, e.message)
+      console.log(`[WA] Reconectando: ${ch.name}`)
+      startSession(ch.id, ch.workspace_id).catch(e =>
+        console.error(`[WA] Erro ao reconectar ${ch.name}:`, e.message)
       )
     }
   } catch (e) {
-    console.error('[Channels] Erro ao inicializar canais:', e.message)
+    console.error('[WA] initChannels error:', e.message)
   }
 }
 
-// ─── Iniciar sessão Baileys ───────────────────────────────────────────────────
+// ─── Iniciar/reconectar sessão ────────────────────────────────────────────────
 export async function startSession(channelId, workspaceId) {
+  // Fechar sessão anterior se existir
   if (sessions.has(channelId)) {
-    const existing = sessions.get(channelId)
-    try { existing.sock?.end(undefined) } catch (_) {}
+    try { sessions.get(channelId).sock?.end(undefined) } catch {}
     sessions.delete(channelId)
+    connected.delete(channelId)
   }
 
-  const { state, saveCreds } = await makeDBAuthState(channelId)
-  const sessionToken = Symbol() // token único para detectar sessão obsoleta
+  const { state, save } = await loadAuth(channelId)
+  const token = Symbol()
 
   const sock = makeWASocket({
     auth: state,
     logger,
     browser: ['GlowDesk', 'Chrome', '1.0'],
-    printQRInTerminal: false,
+    printQRInTerminal: true, // Mostra QR nos logs do Railway para debug
     connectTimeoutMs: 60_000,
     defaultQueryTimeoutMs: 60_000,
-    retryRequestDelayMs: 2000,
-    maxMsgRetryCount: 3
+    retryRequestDelayMs: 2_000,
+    maxMsgRetryCount: 3,
   })
 
   const session = {
-    sock,
-    sessionToken,
-    async sendMessage(jid, content) {
-      const baileysJid = jid.replace('@c.us', '@s.whatsapp.net')
-      await sock.sendMessage(baileysJid, { text: content })
+    sock, token,
+    async sendMessage(jid, text) {
+      const j = jid.replace('@c.us', '@s.whatsapp.net')
+      await sock.sendMessage(j, { text })
     },
     async sendMedia(jid, base64, mimetype, filename) {
-      const baileysJid = jid.replace('@c.us', '@s.whatsapp.net')
-      const buffer = Buffer.from(base64, 'base64')
+      const j = jid.replace('@c.us', '@s.whatsapp.net')
+      const buf  = Buffer.from(base64, 'base64')
       const type = mimetype.startsWith('image/') ? 'image'
                  : mimetype.startsWith('video/') ? 'video'
                  : mimetype.startsWith('audio/') ? 'audio'
                  : 'document'
-      const payload = { [type]: buffer, mimetype }
+      const payload = { [type]: buf, mimetype }
       if (type === 'document') payload.fileName = filename || 'arquivo'
-      await sock.sendMessage(baileysJid, payload)
+      await sock.sendMessage(j, payload)
     }
   }
 
   sessions.set(channelId, session)
-
-  sock.ev.on('creds.update', saveCreds)
+  sock.ev.on('creds.update', save)
 
   sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
-    // Ignorar eventos de sessão obsoleta (substituída por nova chamada a startSession)
-    if (sessions.get(channelId)?.sessionToken !== sessionToken) return
-    // QR code gerado
+    if (sessions.get(channelId)?.token !== token) return // sessão obsoleta
+
     if (qr) {
       try {
-        const qrDataUrl = await qrcode.toDataURL(qr)
-        pendingQRCodes.set(channelId, qrDataUrl) // armazenar para polling HTTP
+        const img = await qrcode.toDataURL(qr)
+        pendingQR.set(channelId, img)
         const io = getIO()
-        if (io) io.to(`workspace:${workspaceId}`).emit('channel_qrcode', { channelId, qrcode: qrDataUrl })
-        await db.query(`UPDATE channels SET status = 'connecting', updated_at = NOW() WHERE id = $1`, [channelId])
-        console.log(`[Channels] QR gerado para canal ${channelId}`)
-      } catch (e) {
-        console.error('[Channels] Erro ao gerar QR:', e.message)
-      }
+        if (io) io.to(`workspace:${workspaceId}`).emit('channel_qrcode', { channelId, qrcode: img })
+        await db.query(`UPDATE channels SET status='connecting', updated_at=NOW() WHERE id=$1`, [channelId])
+        console.log(`[WA] QR gerado para canal ${channelId}`)
+      } catch (e) { console.error('[WA] QR error:', e.message) }
     }
 
-    // Conectado
     if (connection === 'open') {
-      pendingQRCodes.delete(channelId) // QR não é mais necessário
-      connectedSessions.add(channelId)
+      connected.add(channelId)
+      pendingQR.delete(channelId)
       try {
         const phone = sock.user?.id?.split('@')[0]?.split(':')[0] || null
         await db.query(
-          `UPDATE channels SET status = 'connected', phone_number = $1, connected_at = NOW(), updated_at = NOW() WHERE id = $2`,
+          `UPDATE channels SET status='connected', phone_number=$1, connected_at=NOW(), updated_at=NOW() WHERE id=$2`,
           [phone, channelId]
         )
-        await saveCreds()
+        await save()
         const io = getIO()
         if (io) io.to(`workspace:${workspaceId}`).emit('channel_connected', { channelId, phone })
-        console.log(`[Channels] Canal conectado: ${channelId} → ${phone}`)
-      } catch (e) {
-        console.error('[Channels] Erro ao salvar conexão:', e.message)
-      }
+        console.log(`[WA] Conectado: ${channelId} → +${phone}`)
+      } catch (e) { console.error('[WA] open error:', e.message) }
     }
 
-    // Desconectado
     if (connection === 'close') {
-      const code = lastDisconnect?.error?.output?.statusCode
-      const loggedOut = code === DisconnectReason.loggedOut
-      console.log(`[Channels] Desconectado: ${channelId}, code: ${code}, loggedOut: ${loggedOut}`)
-
-      connectedSessions.delete(channelId)
+      connected.delete(channelId)
       sessions.delete(channelId)
 
+      const code      = lastDisconnect?.error?.output?.statusCode
+      const loggedOut = code === DisconnectReason.loggedOut
+      console.log(`[WA] Fechou: ${channelId} code=${code} logout=${loggedOut}`)
+
       if (loggedOut) {
-        await db.query(`UPDATE channels SET status = 'disconnected', updated_at = NOW() WHERE id = $1`, [channelId])
-        await db.query(`DELETE FROM channel_sessions WHERE session_id = $1`, [`baileys-${channelId}`])
+        await db.query(`UPDATE channels SET status='disconnected', updated_at=NOW() WHERE id=$1`, [channelId])
+        await db.query(`DELETE FROM channel_sessions WHERE session_id=$1`, [`wab-${channelId}`])
         const io = getIO()
         if (io) io.to(`workspace:${workspaceId}`).emit('channel_disconnected', { channelId })
       } else {
-        // Reconectar automaticamente após 5s (só se nenhuma sessão nova assumiu)
+        // Reconexão automática — igual ao WhatsApp Web real
+        const delay = code === 408 ? 10_000 : 5_000
         setTimeout(() => {
           if (!sessions.has(channelId)) {
+            console.log(`[WA] Reconectando ${channelId} automaticamente...`)
             startSession(channelId, workspaceId).catch(e =>
-              console.error('[Channels] Erro ao reconectar:', e.message)
+              console.error('[WA] auto-reconect error:', e.message)
             )
           }
-        }, 5000)
+        }, delay)
       }
     }
   })
@@ -222,133 +203,118 @@ export async function startSession(channelId, workspaceId) {
   // ─── Receber mensagens ────────────────────────────────────────────────────
   sock.ev.on('messages.upsert', async ({ messages: msgs, type }) => {
     if (type !== 'notify') return
-
     for (const msg of msgs) {
       try {
         if (msg.key.fromMe) continue
         const jid = msg.key.remoteJid || ''
-        if (jid.includes('status') || jid === '') continue
+        if (!jid || jid.includes('status@broadcast')) continue
 
         const isGroup = jid.endsWith('@g.us')
-        const phone = jid.replace('@g.us', '').replace('@s.whatsapp.net', '').replace('@c.us', '')
+        const phone   = jid.replace('@g.us','').replace('@s.whatsapp.net','').replace('@c.us','')
         if (!phone) continue
 
         let contactName = msg.pushName || null
         if (isGroup) {
-          try {
-            const meta = await sock.groupMetadata(jid)
-            contactName = meta.subject || phone
-          } catch (_) { contactName = phone }
+          try { contactName = (await sock.groupMetadata(jid)).subject } catch { contactName = phone }
         }
 
-        console.log(`[Channels] ✉️ ${isGroup ? 'Grupo' : 'Contato'} ${phone}: "${msg.message?.conversation?.substring(0, 80) || '[mídia]'}"`)
+        console.log(`[WA] ✉️ ${phone}: "${msg.message?.conversation?.substring(0,60) || '[mídia]'}"`)
 
         // 1. Upsert contato
-        const contactResult = await db.query(
+        const { rows: [contact] } = await db.query(
           `INSERT INTO contacts (workspace_id, phone, name, is_group)
-           VALUES ($1, $2, $3, $4)
+           VALUES ($1,$2,$3,$4)
            ON CONFLICT (workspace_id, phone)
-           DO UPDATE SET name = COALESCE($3, contacts.name), is_group = $4, updated_at = NOW()
+           DO UPDATE SET name=COALESCE($3,contacts.name), is_group=$4, updated_at=NOW()
            RETURNING *`,
           [workspaceId, phone, contactName, isGroup]
         )
-        const contact = contactResult.rows[0]
 
         // 2. Upsert conversa
-        let convResult = await db.query(
-          `SELECT * FROM conversations WHERE workspace_id = $1 AND contact_id = $2 AND status != 'resolved' ORDER BY created_at DESC LIMIT 1`,
+        let conversation
+        const existing = await db.query(
+          `SELECT * FROM conversations WHERE workspace_id=$1 AND contact_id=$2 AND status!='resolved' ORDER BY created_at DESC LIMIT 1`,
           [workspaceId, contact.id]
         )
-        let conversation
-        if (!convResult.rows.length) {
-          const newConv = await db.query(
+        if (existing.rows.length) {
+          conversation = existing.rows[0]
+        } else {
+          const { rows: [c] } = await db.query(
             `INSERT INTO conversations (workspace_id, contact_id, channel_id, status, ai_mode, whatsapp_number_id)
-             VALUES ($1, $2, $3, 'open', true, NULL) RETURNING *`,
+             VALUES ($1,$2,$3,'open',true,NULL) RETURNING *`,
             [workspaceId, contact.id, channelId]
           )
-          conversation = newConv.rows[0]
-        } else {
-          conversation = convResult.rows[0]
+          conversation = c
         }
 
-        // 3. Conteúdo da mensagem
-        const body = msg.message?.conversation
-          || msg.message?.extendedTextMessage?.text
-          || msg.message?.imageMessage?.caption
-          || msg.message?.videoMessage?.caption
-          || null
+        // 3. Extrair conteúdo
+        const m    = msg.message || {}
+        const body = m.conversation || m.extendedTextMessage?.text
+                  || m.imageMessage?.caption || m.videoMessage?.caption || null
 
         let contentType = 'text'
-        let mediaUrl = null
-        const m = msg.message || {}
+        let mediaUrl    = null
 
         if (m.imageMessage || m.videoMessage || m.audioMessage || m.pttMessage || m.documentMessage || m.stickerMessage) {
-          if (m.imageMessage)    contentType = 'image'
-          else if (m.videoMessage)    contentType = 'video'
-          else if (m.audioMessage || m.pttMessage) contentType = 'audio'
-          else if (m.documentMessage) contentType = 'document'
-          else if (m.stickerMessage)  contentType = 'sticker'
-
+          contentType = m.imageMessage ? 'image'
+                      : m.videoMessage ? 'video'
+                      : (m.audioMessage || m.pttMessage) ? 'audio'
+                      : m.documentMessage ? 'document'
+                      : 'sticker'
           try {
-            const buffer = await downloadMediaMessage(msg, 'buffer', {})
-            const mime = m.imageMessage?.mimetype || m.videoMessage?.mimetype || m.audioMessage?.mimetype || m.pttMessage?.mimetype || m.documentMessage?.mimetype || 'application/octet-stream'
-            mediaUrl = `data:${mime};base64,${buffer.toString('base64')}`
-          } catch (e) {
-            console.error('[Channels] Erro ao baixar mídia:', e.message)
-          }
+            const buf  = await downloadMediaMessage(msg, 'buffer', {})
+            const mime = m.imageMessage?.mimetype || m.videoMessage?.mimetype
+                       || m.audioMessage?.mimetype || m.pttMessage?.mimetype
+                       || m.documentMessage?.mimetype || 'application/octet-stream'
+            mediaUrl = `data:${mime};base64,${buf.toString('base64')}`
+          } catch (e) { console.error('[WA] media download error:', e.message) }
         }
 
         // 4. Salvar mensagem
-        const savedMsg = await db.query(
+        const { rows: [saved] } = await db.query(
           `INSERT INTO messages (conversation_id, whatsapp_message_id, direction, sender_type, content, content_type, media_url)
-           VALUES ($1, $2, 'inbound', 'contact', $3, $4, $5) RETURNING *`,
+           VALUES ($1,$2,'inbound','contact',$3,$4,$5) RETURNING *`,
           [conversation.id, msg.key.id || null, body, contentType, mediaUrl]
         )
 
         // 5. Atualizar conversa
         await db.query(
-          `UPDATE conversations SET last_message = $1, last_message_at = NOW(), unread_count = unread_count + 1, updated_at = NOW() WHERE id = $2`,
+          `UPDATE conversations SET last_message=$1, last_message_at=NOW(), unread_count=unread_count+1, updated_at=NOW() WHERE id=$2`,
           [body || '[mídia]', conversation.id]
         )
 
-        // 6. Emitir realtime
+        // 6. Realtime
         const io = getIO()
-        if (io) {
-          io.to(`workspace:${workspaceId}`).emit('new_message', {
-            conversationId: conversation.id,
-            message: savedMsg.rows[0],
-            contact
-          })
-        }
+        if (io) io.to(`workspace:${workspaceId}`).emit('new_message', {
+          conversationId: conversation.id, message: saved, contact
+        })
 
-        // 7. Criar deal se não existir
+        // 7. Criar deal automático se necessário
         try {
-          const existing = await db.query(
-            `SELECT id FROM deals WHERE contact_id = $1 AND workspace_id = $2 AND status = 'open' LIMIT 1`,
+          const deal = await db.query(
+            `SELECT id FROM deals WHERE contact_id=$1 AND workspace_id=$2 AND status='open' LIMIT 1`,
             [contact.id, workspaceId]
           )
-          if (!existing.rows.length) {
-            const pipeline = await db.query(
+          if (!deal.rows.length) {
+            const pipe = await db.query(
               `SELECT p.id, ps.id as first_stage_id FROM pipelines p
-               JOIN pipeline_stages ps ON ps.pipeline_id = p.id
-               WHERE p.workspace_id = $1 AND p.is_default = true
+               JOIN pipeline_stages ps ON ps.pipeline_id=p.id
+               WHERE p.workspace_id=$1 AND p.is_default=true
                ORDER BY ps.position ASC LIMIT 1`,
               [workspaceId]
             )
-            if (pipeline.rows.length > 0) {
-              const { id: pipelineId, first_stage_id } = pipeline.rows[0]
+            if (pipe.rows.length) {
               await db.query(
-                `INSERT INTO deals (workspace_id, contact_id, pipeline_id, stage_id, title, value, status)
-                 VALUES ($1, $2, $3, $4, $5, 0, 'open')`,
-                [workspaceId, contact.id, pipelineId, first_stage_id, `Conversa com ${contact.name || contact.phone}`]
+                `INSERT INTO deals (workspace_id,contact_id,pipeline_id,stage_id,title,value,status)
+                 VALUES ($1,$2,$3,$4,$5,0,'open')`,
+                [workspaceId, contact.id, pipe.rows[0].id, pipe.rows[0].first_stage_id,
+                 `Conversa com ${contact.name || contact.phone}`]
               )
             }
           }
-        } catch (e) {
-          console.error('[Pipeline] Erro ao criar deal:', e.message)
-        }
+        } catch {}
       } catch (e) {
-        console.error('[Channels] Erro ao processar mensagem:', e.message)
+        console.error('[WA] message processing error:', e.message)
       }
     }
   })
@@ -356,26 +322,14 @@ export async function startSession(channelId, workspaceId) {
   return session
 }
 
-// ─── Destruir sessão ──────────────────────────────────────────────────────────
+// ─── API pública ──────────────────────────────────────────────────────────────
 export async function destroySession(channelId) {
-  const session = sessions.get(channelId)
-  if (session) {
-    try { session.sock?.end(undefined) } catch (_) {}
-    sessions.delete(channelId)
-  }
+  try { sessions.get(channelId)?.sock?.end(undefined) } catch {}
+  sessions.delete(channelId)
+  connected.delete(channelId)
+  pendingQR.delete(channelId)
 }
 
-// ─── Obter sessão ─────────────────────────────────────────────────────────────
-export function getSession(channelId) {
-  return sessions.get(channelId) || null
-}
-
-// ─── Listar sessões ativas (somente conectadas) ───────────────────────────────
-export function getSessions() {
-  return Array.from(connectedSessions)
-}
-
-// ─── QR code pendente (polling HTTP fallback) ─────────────────────────────────
-export function getPendingQR(channelId) {
-  return pendingQRCodes.get(channelId) || null
-}
+export function getSession(channelId)  { return sessions.get(channelId) || null }
+export function getSessions()          { return Array.from(connected) }
+export function getPendingQR(channelId){ return pendingQR.get(channelId) || null }

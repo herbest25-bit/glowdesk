@@ -426,20 +426,34 @@ export default function InboxPage() {
     : {}
 
   useEffect(() => {
-    api.get('/api/channels/sessions').then((d: any) => {
+    api.get('/api/channels/sessions').then(async (d: any) => {
       const inactive = !d.activeSessions || d.activeSessions.length === 0
       setNoChannelActive(inactive)
-      if (inactive) {
-        // Pré-carregar canal desconectado para reconexão inline
-        api.get('/api/channels').then((ch: any) => {
-          const disconnected = ch.channels?.find((c: any) => c.status !== 'connected')
-            || ch.channels?.[0]
-          if (disconnected) {
-            setConnectChannelId(disconnected.id)
-            connectChannelIdRef.current = disconnected.id
-          }
-        }).catch(() => {})
-      }
+      if (!inactive) return
+
+      // Buscar canal e abrir QR automaticamente
+      try {
+        const ch = await api.get('/api/channels') as any
+        const channel = ch.channels?.[0]
+        if (!channel) return
+
+        setConnectChannelId(channel.id)
+        connectChannelIdRef.current = channel.id
+        setShowConnectModal(true)
+        setConnectQR(null)
+
+        // Disparar geração do QR
+        await api.get(`/api/channels/${channel.id}/qrcode`)
+
+        // Polling HTTP fallback
+        const poll = setInterval(async () => {
+          try {
+            const qd = await api.get(`/api/channels/${channel.id}/qr-poll`) as any
+            if (qd.qrcode) { setConnectQR(qd.qrcode); clearInterval(poll) }
+          } catch {}
+        }, 2000)
+        setTimeout(() => clearInterval(poll), 120_000)
+      } catch {}
     }).catch(() => {})
   }, [])
 
