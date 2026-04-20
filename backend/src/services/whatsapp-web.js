@@ -1,46 +1,71 @@
-import pkg from 'whatsapp-web.js'
-const { Client, RemoteAuth } = pkg
+import { makeWASocket, DisconnectReason, initAuthCreds, BufferJSON, downloadMediaMessage } from '@whiskeysockets/baileys'
 import qrcode from 'qrcode'
 import { db } from '../utils/db.js'
 import { getIO } from './realtime.js'
-import fs from 'fs'
+import pino from 'pino'
 
-const sessions = new Map() // channelId → Client
+const sessions = new Map() // channelId → session wrapper
+const logger = pino({ level: 'silent' })
 
-// ─── Store de sessão no banco de dados ───────────────────────────────────────
-function makeStore() {
-  return {
-    async sessionExists({ session }) {
-      const r = await db.query('SELECT 1 FROM channel_sessions WHERE session_id = $1', [session])
-      return r.rows.length > 0
-    },
-    async save({ session }) {
-      const zipPath = `./${session}.zip`
-      if (!fs.existsSync(zipPath)) return
-      const data = fs.readFileSync(zipPath).toString('base64')
-      await db.query(
-        `INSERT INTO channel_sessions (session_id, session_data, updated_at)
-         VALUES ($1, $2, NOW())
-         ON CONFLICT (session_id) DO UPDATE SET session_data = $2, updated_at = NOW()`,
-        [session, data]
-      )
-      console.log(`[Session] Sessão salva no banco: ${session}`)
-    },
-    async extract({ session, path }) {
-      const r = await db.query('SELECT session_data FROM channel_sessions WHERE session_id = $1', [session])
-      if (!r.rows.length) throw new Error('Sessão não encontrada no banco')
-      const data = Buffer.from(r.rows[0].session_data, 'base64')
-      fs.writeFileSync(`${path}.zip`, data)
-      console.log(`[Session] Sessão restaurada do banco: ${session}`)
-    },
-    async delete({ session }) {
-      await db.query('DELETE FROM channel_sessions WHERE session_id = $1', [session])
-      console.log(`[Session] Sessão removida do banco: ${session}`)
+// ─── Auth state persistido no banco ──────────────────────────────────────────
+async function makeDBAuthState(channelId) {
+  const row = await db.query(
+    'SELECT session_data FROM channel_sessions WHERE session_id = $1',
+    [`baileys-${channelId}`]
+  )
+
+  let creds = initAuthCreds()
+  let keys = {}
+
+  if (row.rows.length > 0 && row.rows[0].session_data) {
+    try {
+      const parsed = JSON.parse(row.rows[0].session_data, BufferJSON.reviver)
+      if (parsed.creds) creds = parsed.creds
+      if (parsed.keys) keys = parsed.keys
+    } catch (e) {
+      console.error('[Baileys] Erro ao carregar auth state:', e.message)
     }
+  }
+
+  const saveCreds = async () => {
+    const data = JSON.stringify({ creds, keys }, BufferJSON.replacer)
+    await db.query(
+      `INSERT INTO channel_sessions (session_id, session_data, updated_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (session_id) DO UPDATE SET session_data = $2, updated_at = NOW()`,
+      [`baileys-${channelId}`, data]
+    )
+  }
+
+  return {
+    state: {
+      creds,
+      keys: {
+        get: (type, ids) => {
+          const data = {}
+          for (const id of ids) {
+            const value = keys[`${type}-${id}`]
+            if (value) data[id] = value
+          }
+          return data
+        },
+        set: (data) => {
+          for (const category in data) {
+            for (const id in data[category]) {
+              const value = data[category][id]
+              if (value) keys[`${category}-${id}`] = value
+              else delete keys[`${category}-${id}`]
+            }
+          }
+          saveCreds().catch(e => console.error('[Baileys] Erro ao salvar keys:', e.message))
+        }
+      }
+    },
+    saveCreds
   }
 }
 
-// ─── Inicializar todos os canais conectados ao subir o servidor ───────────────
+// ─── Inicializar canais ao subir o servidor ───────────────────────────────────
 export async function initChannels() {
   try {
     const result = await db.query(
@@ -57,295 +82,258 @@ export async function initChannels() {
   }
 }
 
-// ─── Iniciar sessão para um canal ─────────────────────────────────────────────
+// ─── Iniciar sessão Baileys ───────────────────────────────────────────────────
 export async function startSession(channelId, workspaceId) {
   if (sessions.has(channelId)) {
     const existing = sessions.get(channelId)
-    try { await existing.destroy() } catch (_) {}
+    try { existing.sock?.end(undefined) } catch (_) {}
+    sessions.delete(channelId)
   }
 
-  const client = new Client({
-    authStrategy: new RemoteAuth({
-      clientId: channelId,
-      store: makeStore(),
-      backupSyncIntervalMs: 60_000
-    }),
-    puppeteer: {
-      headless: true,
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
-      protocolTimeout: 120000,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--no-first-run',
-        '--disable-extensions',
-        '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-renderer-backgrounding'
-      ]
-    }
+  const { state, saveCreds } = await makeDBAuthState(channelId)
+
+  const sock = makeWASocket({
+    auth: state,
+    logger,
+    browser: ['GlowDesk', 'Chrome', '1.0'],
+    printQRInTerminal: false,
+    connectTimeoutMs: 60_000,
+    defaultQueryTimeoutMs: 60_000,
+    retryRequestDelayMs: 2000,
+    maxMsgRetryCount: 3
   })
 
-  sessions.set(channelId, client)
+  // Wrapper com mesma interface do whatsapp-web.js
+  const session = {
+    sock,
+    async sendMessage(jid, content) {
+      // Converter @c.us → @s.whatsapp.net (formato Baileys para individuais)
+      const baileysJid = jid.replace('@c.us', '@s.whatsapp.net')
+      await sock.sendMessage(baileysJid, { text: content })
+    },
+    async sendMedia(jid, base64, mimetype, filename) {
+      const baileysJid = jid.replace('@c.us', '@s.whatsapp.net')
+      const buffer = Buffer.from(base64, 'base64')
+      const type = mimetype.startsWith('image/') ? 'image'
+                 : mimetype.startsWith('video/') ? 'video'
+                 : mimetype.startsWith('audio/') ? 'audio'
+                 : 'document'
+      const payload = { [type]: buffer, mimetype }
+      if (type === 'document') payload.fileName = filename || 'arquivo'
+      await sock.sendMessage(baileysJid, payload)
+    }
+  }
 
-  client.on('qr', async (qr) => {
-    try {
-      const qrDataUrl = await qrcode.toDataURL(qr)
-      const io = getIO()
-      if (io) {
-        io.to(`workspace:${workspaceId}`).emit('channel_qrcode', { channelId, qrcode: qrDataUrl })
+  sessions.set(channelId, session)
+
+  sock.ev.on('creds.update', saveCreds)
+
+  sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
+    // QR code gerado
+    if (qr) {
+      try {
+        const qrDataUrl = await qrcode.toDataURL(qr)
+        const io = getIO()
+        if (io) io.to(`workspace:${workspaceId}`).emit('channel_qrcode', { channelId, qrcode: qrDataUrl })
+        await db.query(`UPDATE channels SET status = 'connecting', updated_at = NOW() WHERE id = $1`, [channelId])
+      } catch (e) {
+        console.error('[Channels] Erro ao gerar QR:', e.message)
       }
-      await db.query(
-        `UPDATE channels SET status = 'connecting', updated_at = NOW() WHERE id = $1`,
-        [channelId]
-      )
-    } catch (e) {
-      console.error('[Channels] Erro ao gerar QR:', e.message)
     }
-  })
 
-  client.on('ready', async () => {
-    try {
-      const info = client.info
-      const phone = info?.wid?.user || null
-      await db.query(
-        `UPDATE channels SET status = 'connected', phone_number = $1, connected_at = NOW(), updated_at = NOW() WHERE id = $2`,
-        [phone, channelId]
-      )
-      const io = getIO()
-      if (io) {
-        io.to(`workspace:${workspaceId}`).emit('channel_connected', { channelId, phone })
+    // Conectado
+    if (connection === 'open') {
+      try {
+        const phone = sock.user?.id?.split('@')[0]?.split(':')[0] || null
+        await db.query(
+          `UPDATE channels SET status = 'connected', phone_number = $1, connected_at = NOW(), updated_at = NOW() WHERE id = $2`,
+          [phone, channelId]
+        )
+        await saveCreds()
+        const io = getIO()
+        if (io) io.to(`workspace:${workspaceId}`).emit('channel_connected', { channelId, phone })
+        console.log(`[Channels] Canal conectado: ${channelId} → ${phone}`)
+      } catch (e) {
+        console.error('[Channels] Erro ao salvar conexão:', e.message)
       }
-      console.log(`[Channels] Canal conectado: ${channelId} → ${phone}`)
-
-      // Forçar backup da sessão após 20s (RemoteAuth cria o zip no intervalo de 15s)
-      setTimeout(async () => {
-        try {
-          const zipPath = `./${channelId}.zip`
-          if (fs.existsSync(zipPath)) {
-            const data = fs.readFileSync(zipPath).toString('base64')
-            await db.query(
-              `INSERT INTO channel_sessions (session_id, session_data, updated_at)
-               VALUES ($1, $2, NOW())
-               ON CONFLICT (session_id) DO UPDATE SET session_data = $2, updated_at = NOW()`,
-              [channelId, data]
-            )
-            console.log(`[Session] Backup forçado após ready: ${channelId}`)
-          } else {
-            console.log(`[Session] Zip ainda não criado em 20s: ${channelId}`)
-          }
-        } catch (e) {
-          console.error('[Session] Erro no backup forçado:', e.message)
-        }
-      }, 20_000)
-    } catch (e) {
-      console.error('[Channels] Erro ao salvar conexão:', e.message)
     }
-  })
 
-  client.on('auth_failure', async (msg) => {
-    console.log(`[Channels] Falha de autenticação: ${channelId} — ${msg}`)
-    sessions.delete(channelId)
-    try {
-      await db.query(
-        `UPDATE channels SET status = 'disconnected', updated_at = NOW() WHERE id = $1`,
-        [channelId]
-      )
-      const io = getIO()
-      if (io) {
-        io.to(`workspace:${workspaceId}`).emit('channel_disconnected', { channelId })
-      }
-    } catch (e) {
-      console.error('[Channels] Erro ao atualizar status após falha de auth:', e.message)
-    }
-  })
+    // Desconectado
+    if (connection === 'close') {
+      const code = lastDisconnect?.error?.output?.statusCode
+      const loggedOut = code === DisconnectReason.loggedOut
+      console.log(`[Channels] Desconectado: ${channelId}, code: ${code}, loggedOut: ${loggedOut}`)
 
-  client.on('disconnected', async (reason) => {
-    console.log(`[Channels] Canal desconectado: ${channelId} — ${reason}`)
-    sessions.delete(channelId)
-    try {
-      await db.query(
-        `UPDATE channels SET status = 'disconnected', updated_at = NOW() WHERE id = $1`,
-        [channelId]
-      )
-      const result = await db.query(`SELECT workspace_id FROM channels WHERE id = $1`, [channelId])
-      const wsId = result.rows[0]?.workspace_id
-      const io = getIO()
-      if (io && wsId) {
-        io.to(`workspace:${wsId}`).emit('channel_disconnected', { channelId })
-      }
-    } catch (e) {
-      console.error('[Channels] Erro ao atualizar status:', e.message)
-    }
-  })
+      sessions.delete(channelId)
 
-  client.on('message', async (msg) => {
-    try {
-      if (msg.fromMe) return
-      if (msg.from === 'status@broadcast') return // ignorar status do WhatsApp
-
-      const isGroup = msg.from.endsWith('@g.us')
-      console.log(`[Channels] ✉️ ${isGroup ? 'Grupo' : 'Contato'} ${msg.from}: "${msg.body?.substring(0, 80)}"`)
-
-      let phone, contactName
-      if (isGroup) {
-        phone = msg.from.replace('@g.us', '')
-        try {
-          const chat = await msg.getChat()
-          contactName = chat.name || phone
-        } catch (_) {
-          contactName = phone
-        }
+      if (loggedOut) {
+        await db.query(`UPDATE channels SET status = 'disconnected', updated_at = NOW() WHERE id = $1`, [channelId])
+        await db.query(`DELETE FROM channel_sessions WHERE session_id = $1`, [`baileys-${channelId}`])
+        const io = getIO()
+        if (io) io.to(`workspace:${workspaceId}`).emit('channel_disconnected', { channelId })
       } else {
-        phone = msg.from.replace('@c.us', '')
-        contactName = msg._data?.notifyName || null
+        // Reconectar automaticamente após 5s
+        setTimeout(() => {
+          startSession(channelId, workspaceId).catch(e =>
+            console.error('[Channels] Erro ao reconectar:', e.message)
+          )
+        }, 5000)
       }
+    }
+  })
 
-      // 1. Upsert contato
-      const contactResult = await db.query(
-        `INSERT INTO contacts (workspace_id, phone, name, is_group)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (workspace_id, phone)
-         DO UPDATE SET name = COALESCE($3, contacts.name), is_group = $4, updated_at = NOW()
-         RETURNING *`,
-        [workspaceId, phone, contactName, isGroup]
-      )
-      const contact = contactResult.rows[0]
-      console.log(`[Channels] Contato: ${contact.id} (${contact.name || phone})`)
+  // ─── Receber mensagens ────────────────────────────────────────────────────
+  sock.ev.on('messages.upsert', async ({ messages: msgs, type }) => {
+    if (type !== 'notify') return
 
-      // 2. Upsert conversa (vinculada ao canal)
-      let convResult = await db.query(
-        `SELECT * FROM conversations
-         WHERE workspace_id = $1 AND contact_id = $2 AND status != 'resolved'
-         ORDER BY created_at DESC LIMIT 1`,
-        [workspaceId, contact.id]
-      )
-      let conversation
-      if (convResult.rows.length === 0) {
-        // Tenta com channel_id, se falhar cria sem
-        let newConv
-        try {
-          newConv = await db.query(
+    for (const msg of msgs) {
+      try {
+        if (msg.key.fromMe) continue
+        const jid = msg.key.remoteJid || ''
+        if (jid.includes('status') || jid === '') continue
+
+        const isGroup = jid.endsWith('@g.us')
+        const phone = jid.replace('@g.us', '').replace('@s.whatsapp.net', '').replace('@c.us', '')
+        if (!phone) continue
+
+        let contactName = msg.pushName || null
+        if (isGroup) {
+          try {
+            const meta = await sock.groupMetadata(jid)
+            contactName = meta.subject || phone
+          } catch (_) { contactName = phone }
+        }
+
+        console.log(`[Channels] ✉️ ${isGroup ? 'Grupo' : 'Contato'} ${phone}: "${msg.message?.conversation?.substring(0, 80) || '[mídia]'}"`)
+
+        // 1. Upsert contato
+        const contactResult = await db.query(
+          `INSERT INTO contacts (workspace_id, phone, name, is_group)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (workspace_id, phone)
+           DO UPDATE SET name = COALESCE($3, contacts.name), is_group = $4, updated_at = NOW()
+           RETURNING *`,
+          [workspaceId, phone, contactName, isGroup]
+        )
+        const contact = contactResult.rows[0]
+
+        // 2. Upsert conversa
+        let convResult = await db.query(
+          `SELECT * FROM conversations WHERE workspace_id = $1 AND contact_id = $2 AND status != 'resolved' ORDER BY created_at DESC LIMIT 1`,
+          [workspaceId, contact.id]
+        )
+        let conversation
+        if (!convResult.rows.length) {
+          const newConv = await db.query(
             `INSERT INTO conversations (workspace_id, contact_id, channel_id, status, ai_mode, whatsapp_number_id)
-             VALUES ($1, $2, $3, 'open', true, NULL)
-             RETURNING *`,
+             VALUES ($1, $2, $3, 'open', true, NULL) RETURNING *`,
             [workspaceId, contact.id, channelId]
           )
-        } catch (_) {
-          newConv = await db.query(
-            `INSERT INTO conversations (workspace_id, contact_id, status, ai_mode)
-             VALUES ($1, $2, 'open', true)
-             RETURNING *`,
-            [workspaceId, contact.id]
-          )
+          conversation = newConv.rows[0]
+        } else {
+          conversation = convResult.rows[0]
         }
-        conversation = newConv.rows[0]
-        console.log(`[Channels] Nova conversa criada: ${conversation.id}`)
-      } else {
-        conversation = convResult.rows[0]
-        console.log(`[Channels] Conversa existente: ${conversation.id}`)
-      }
 
-      // 3. Conteúdo da mensagem
-      console.log(`[Channels] tipo=${msg.type} hasMedia=${msg.hasMedia} body="${msg.body?.substring(0,30)}"`)
-      let content = msg.body || null
-      let contentType = msg.type === 'chat' ? 'text' : (msg.type || 'text')
-      let mediaUrl = null
+        // 3. Conteúdo da mensagem
+        const body = msg.message?.conversation
+          || msg.message?.extendedTextMessage?.text
+          || msg.message?.imageMessage?.caption
+          || msg.message?.videoMessage?.caption
+          || null
 
-      const mediaTypes = ['image', 'video', 'audio', 'ptt', 'document', 'sticker']
-      if (msg.hasMedia || mediaTypes.includes(msg.type)) {
-        if (msg.type === 'ptt') contentType = 'audio'
+        let contentType = 'text'
+        let mediaUrl = null
+        const m = msg.message || {}
+
+        if (m.imageMessage || m.videoMessage || m.audioMessage || m.pttMessage || m.documentMessage || m.stickerMessage) {
+          if (m.imageMessage)    contentType = 'image'
+          else if (m.videoMessage)    contentType = 'video'
+          else if (m.audioMessage || m.pttMessage) contentType = 'audio'
+          else if (m.documentMessage) contentType = 'document'
+          else if (m.stickerMessage)  contentType = 'sticker'
+
+          try {
+            const buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger, reuploadRequest: sock.updateMediaMessage })
+            const mime = m.imageMessage?.mimetype || m.videoMessage?.mimetype || m.audioMessage?.mimetype || m.pttMessage?.mimetype || m.documentMessage?.mimetype || 'application/octet-stream'
+            mediaUrl = `data:${mime};base64,${buffer.toString('base64')}`
+          } catch (e) {
+            console.error('[Channels] Erro ao baixar mídia:', e.message)
+          }
+        }
+
+        // 4. Salvar mensagem
+        const savedMsg = await db.query(
+          `INSERT INTO messages (conversation_id, whatsapp_message_id, direction, sender_type, content, content_type, media_url)
+           VALUES ($1, $2, 'inbound', 'contact', $3, $4, $5) RETURNING *`,
+          [conversation.id, msg.key.id || null, body, contentType, mediaUrl]
+        )
+
+        // 5. Atualizar conversa
+        await db.query(
+          `UPDATE conversations SET last_message = $1, last_message_at = NOW(), unread_count = unread_count + 1, updated_at = NOW() WHERE id = $2`,
+          [body || '[mídia]', conversation.id]
+        )
+
+        // 6. Emitir realtime
+        const io = getIO()
+        if (io) {
+          io.to(`workspace:${workspaceId}`).emit('new_message', {
+            conversationId: conversation.id,
+            message: savedMsg.rows[0],
+            contact
+          })
+        }
+
+        // 7. Criar deal se não existir
         try {
-          const media = await msg.downloadMedia()
-          if (media) {
-            mediaUrl = `data:${media.mimetype};base64,${media.data}`
-            console.log(`[Channels] Mídia baixada: ${media.mimetype} (${Math.round(media.data.length * 0.75 / 1024)}KB)`)
+          const existing = await db.query(
+            `SELECT id FROM deals WHERE contact_id = $1 AND workspace_id = $2 AND status = 'open' LIMIT 1`,
+            [contact.id, workspaceId]
+          )
+          if (!existing.rows.length) {
+            const pipeline = await db.query(
+              `SELECT p.id, ps.id as first_stage_id FROM pipelines p
+               JOIN pipeline_stages ps ON ps.pipeline_id = p.id
+               WHERE p.workspace_id = $1 AND p.is_default = true
+               ORDER BY ps.position ASC LIMIT 1`,
+              [workspaceId]
+            )
+            if (pipeline.rows.length > 0) {
+              const { id: pipelineId, first_stage_id } = pipeline.rows[0]
+              await db.query(
+                `INSERT INTO deals (workspace_id, contact_id, pipeline_id, stage_id, title, value, status)
+                 VALUES ($1, $2, $3, $4, $5, 0, 'open')`,
+                [workspaceId, contact.id, pipelineId, first_stage_id, `Conversa com ${contact.name || contact.phone}`]
+              )
+            }
           }
         } catch (e) {
-          console.error('[Channels] Erro ao baixar mídia:', e.message)
-        }
-      }
-
-      // 4. Salvar mensagem
-      const savedMsg = await db.query(
-        `INSERT INTO messages (conversation_id, whatsapp_message_id, direction, sender_type, content, content_type, media_url)
-         VALUES ($1, $2, 'inbound', 'contact', $3, $4, $5)
-         RETURNING *`,
-        [conversation.id, msg.id?.id || null, content, contentType, mediaUrl]
-      )
-
-      // 5. Atualizar conversa
-      await db.query(
-        `UPDATE conversations
-         SET last_message = $1, last_message_at = NOW(), unread_count = unread_count + 1, updated_at = NOW()
-         WHERE id = $2`,
-        [content || '[mídia]', conversation.id]
-      )
-
-      // 6. Emitir em tempo real para o painel
-      const io = getIO()
-      if (io) {
-        io.to(`workspace:${workspaceId}`).emit('new_message', {
-          conversationId: conversation.id,
-          message: savedMsg.rows[0],
-          contact
-        })
-      }
-
-      // 7. Criar deal no pipeline se ainda não existir para este contato
-      try {
-        const existingDeal = await db.query(
-          `SELECT id FROM deals WHERE contact_id = $1 AND workspace_id = $2 AND status = 'open' LIMIT 1`,
-          [contact.id, workspaceId]
-        )
-        if (existingDeal.rows.length === 0) {
-          const pipeline = await db.query(
-            `SELECT p.id, ps.id as first_stage_id
-             FROM pipelines p
-             JOIN pipeline_stages ps ON ps.pipeline_id = p.id
-             WHERE p.workspace_id = $1 AND p.is_default = true
-             ORDER BY ps.position ASC LIMIT 1`,
-            [workspaceId]
-          )
-          if (pipeline.rows.length > 0) {
-            const { id: pipelineId, first_stage_id } = pipeline.rows[0]
-            await db.query(
-              `INSERT INTO deals (workspace_id, contact_id, pipeline_id, stage_id, title, value, status)
-               VALUES ($1, $2, $3, $4, $5, 0, 'open')`,
-              [workspaceId, contact.id, pipelineId, first_stage_id, `Conversa com ${contact.name || contact.phone}`]
-            )
-            console.log(`[Pipeline] Deal criado para contato: ${contact.name || contact.phone}`)
-          }
+          console.error('[Pipeline] Erro ao criar deal:', e.message)
         }
       } catch (e) {
-        console.error('[Pipeline] Erro ao criar deal:', e.message)
+        console.error('[Channels] Erro ao processar mensagem:', e.message)
       }
-    } catch (e) {
-      console.error('[Channels] Erro ao processar mensagem:', e.message)
     }
   })
 
-  await client.initialize()
-  return client
+  return session
 }
 
 // ─── Destruir sessão ──────────────────────────────────────────────────────────
 export async function destroySession(channelId) {
-  const client = sessions.get(channelId)
-  if (client) {
-    try { await client.destroy() } catch (_) {}
+  const session = sessions.get(channelId)
+  if (session) {
+    try { session.sock?.end(undefined) } catch (_) {}
     sessions.delete(channelId)
   }
 }
 
-// ─── Obter cliente ────────────────────────────────────────────────────────────
+// ─── Obter sessão ─────────────────────────────────────────────────────────────
 export function getSession(channelId) {
   return sessions.get(channelId) || null
 }
 
-// ─── Listar IDs de sessões ativas ─────────────────────────────────────────────
+// ─── Listar sessões ativas ────────────────────────────────────────────────────
 export function getSessions() {
   return Array.from(sessions.keys())
 }

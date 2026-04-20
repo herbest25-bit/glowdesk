@@ -132,10 +132,8 @@ export async function conversationRoutes(fastify) {
       try {
         const { media_base64, media_mimetype, media_filename } = req.body
         if (media_base64 && media_mimetype) {
-          const wwjs = await import('whatsapp-web.js')
-          const MM = wwjs.default.MessageMedia
-          const media = new MM(media_mimetype, media_base64, media_filename || 'arquivo')
-          await client.sendMessage(`${conv.phone}@c.us`, media)
+          const jid = conv.is_group ? `${conv.phone}@g.us` : `${conv.phone}@c.us`
+          await client.sendMedia(jid, media_base64, media_mimetype, media_filename)
         } else {
           const jid = conv.is_group ? `${conv.phone}@g.us` : `${conv.phone}@c.us`
           await client.sendMessage(jid, content)
