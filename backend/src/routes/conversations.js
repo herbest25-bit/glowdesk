@@ -1,7 +1,7 @@
 import { db } from '../utils/db.js'
 import { sendWhatsAppMessage } from '../services/whatsapp-api.js'
 import { emitToWorkspace } from '../services/realtime.js'
-import { getSession } from '../services/whatsapp-web.js'
+import { getSession, getSessions } from '../services/whatsapp-web.js'
 
 function normalizePhone(phone) {
   const digits = phone.replace(/\D/g, '')
@@ -107,9 +107,6 @@ export async function conversationRoutes(fastify) {
 
     if (!convResult.rows.length) return reply.status(404).send({ error: 'Conversa não encontrada' })
     const conv = convResult.rows[0]
-
-    // Enviar pelo canal correto
-    const { getSession, getSessions } = await import('../services/whatsapp-web.js')
 
     // Determinar canal: usar channel_id da conversa ou pegar qualquer sessão ativa
     let channelId = conv.channel_id

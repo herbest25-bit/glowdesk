@@ -123,12 +123,17 @@ export async function startSession(channelId, workspaceId) {
   const session = {
     sock, token,
     async sendMessage(jid, text) {
-      const j = jid.replace('@c.us', '@s.whatsapp.net')
-      await sock.sendMessage(j, { text })
+      const phone = jid.split('@')[0]
+      const suffix = jid.endsWith('@g.us') ? '@g.us' : '@s.whatsapp.net'
+      const normalJid = `${phone}${suffix}`
+      console.log(`[WA] sendMessage → ${normalJid} | text: "${String(text).substring(0, 40)}"`)
+      await sock.sendMessage(normalJid, { text: String(text) })
     },
     async sendMedia(jid, base64, mimetype, filename) {
-      const j = jid.replace('@c.us', '@s.whatsapp.net')
-      const buf  = Buffer.from(base64, 'base64')
+      const phone  = jid.split('@')[0]
+      const suffix = jid.endsWith('@g.us') ? '@g.us' : '@s.whatsapp.net'
+      const j      = `${phone}${suffix}`
+      const buf    = Buffer.from(base64, 'base64')
       const type = mimetype.startsWith('image/') ? 'image'
                  : mimetype.startsWith('video/') ? 'video'
                  : mimetype.startsWith('audio/') ? 'audio'

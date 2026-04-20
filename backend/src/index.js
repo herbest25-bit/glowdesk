@@ -47,7 +47,7 @@ await fastify.register(jwt, {
 authMiddleware(fastify)
 
 // ── Rotas públicas ─────────────────────────────────────────────
-fastify.get('/health', async () => ({ status: 'ok', version: '1.0.0' }))
+fastify.get('/health', async () => ({ status: 'ok', version: '2.0.0-baileys' }))
 fastify.get('/webhook/whatsapp', verifyWebhook)
 fastify.post('/webhook/whatsapp', receiveWebhook)
 

@@ -9,8 +9,9 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-COPY package.json package-lock.json* ./
-RUN npm install --production
+# Copy only backend package.json — never the root monorepo lockfile
+COPY package.json ./
+RUN npm install --production --no-package-lock
 
 COPY src ./src
 
