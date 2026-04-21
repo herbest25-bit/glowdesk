@@ -21,9 +21,10 @@ const connected   = new Set()   // channelId de sessões abertas
 const pendingQR   = new Map()   // channelId → qrDataUrl
 
 const logger = {
-  level: 'silent',
-  trace:()=>{}, debug:()=>{}, info:()=>{},
-  warn:()=>{}, error:()=>{}, fatal:()=>{},
+  level: 'error',
+  trace:()=>{}, debug:()=>{}, info:()=>{}, warn:()=>{},
+  error:(obj, msg) => console.error('[Baileys]', msg || obj?.message || obj),
+  fatal:(obj, msg) => console.error('[Baileys FATAL]', msg || obj?.message || obj),
   child() { return this }
 }
 
@@ -152,6 +153,7 @@ export async function startSession(channelId, workspaceId) {
   sock.ev.on('creds.update', save)
 
   sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
+    console.log(`[WA] connection.update canal=${channelId} connection=${connection} hasQR=${!!qr}`)
     if (sessions.get(channelId)?.token !== token) return // sessão obsoleta
 
     if (qr) {

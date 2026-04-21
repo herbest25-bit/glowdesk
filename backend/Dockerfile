@@ -4,10 +4,14 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
     git python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
 
+# Redirecionar git+ssh para HTTPS (dependências transitivas do Baileys)
+RUN git config --global url."https://github.com/".insteadOf "git+ssh://git@github.com/" \
+ && git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+
 WORKDIR /app
 
 COPY package.json ./
-RUN npm install --production
+RUN npm install --production --no-audit --no-fund
 
 COPY src ./src
 
