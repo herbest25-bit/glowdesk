@@ -1,14 +1,14 @@
 FROM node:20-slim
 
 RUN apt-get update -y && apt-get install -y --no-install-recommends \
-    git python3 make g++ \
+    git python3 make g++ ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY package.json ./
 RUN printf '[url "https://github.com/"]\n\tinsteadOf = git+ssh://git@github.com/\n\tinsteadOf = ssh://git@github.com/\n' > /root/.gitconfig \
- && npm install --production
+ && npm install --production --legacy-peer-deps
 
 COPY src ./src
 
