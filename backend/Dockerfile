@@ -1,14 +1,11 @@
-FROM node:20
+FROM node:20-alpine
 
-# Force git to use HTTPS instead of SSH — Railway has no SSH keys
-RUN git config --global url."https://github.com/".insteadOf git+ssh://git@github.com/ && \
-    git config --global url."https://github.com/".insteadOf ssh://git@github.com/ && \
-    git config --global url."https://github.com/".insteadOf git://github.com/
+RUN apk add --no-cache python3 make g++ git
 
 WORKDIR /app
 
 COPY package.json ./
-RUN npm install --production
+RUN npm install --production --prefer-online
 
 COPY src ./src
 
