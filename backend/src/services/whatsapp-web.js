@@ -114,16 +114,18 @@ export async function startSession(channelId, workspaceId) {
   const { state, save } = await loadAuth(channelId)
   const token = Symbol()
 
+  console.log(`[WA] makeWASocket iniciando canal=${channelId}`)
   const sock = makeWASocket({
     auth: state,
     logger,
     browser: ['GlowDesk', 'Chrome', '1.0'],
-    printQRInTerminal: true, // Mostra QR nos logs do Railway para debug
-    connectTimeoutMs: 60_000,
-    defaultQueryTimeoutMs: 60_000,
+    printQRInTerminal: true,
+    connectTimeoutMs: 120_000,
+    defaultQueryTimeoutMs: 120_000,
     retryRequestDelayMs: 2_000,
     maxMsgRetryCount: 3,
   })
+  console.log(`[WA] makeWASocket criado, aguardando eventos canal=${channelId}`)
 
   const session = {
     sock, token,

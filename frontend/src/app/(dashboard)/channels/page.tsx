@@ -110,10 +110,10 @@ export default function ChannelsPage() {
       } catch {}
     }, 3000)
 
-    // Timeout de 90s: se QR não aparecer, mostrar erro
+    // Timeout de 3min: se QR não aparecer, mostrar erro
     const timeoutId = setTimeout(() => {
       if (!qrCode) setQrTimeout(true)
-    }, 90_000)
+    }, 180_000)
 
     const t = setInterval(() => {
       setQrExpiry(e => {
@@ -443,7 +443,7 @@ export default function ChannelsPage() {
                       <div className="text-center px-4">
                         <div className="w-10 h-10 border-violet-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" style={{ borderWidth: 3, borderStyle: 'solid' }} />
                         <p className="text-sm font-medium mb-1" style={{ color: '#c4b5fd' }}>Iniciando WhatsApp...</p>
-                        <p className="text-xs" style={{ color: '#8b6fba' }}>Aguarde ~30 segundos enquanto o sistema prepara a conexão</p>
+                        <p className="text-xs" style={{ color: '#8b6fba' }}>Aguarde até 2 minutos enquanto o sistema conecta ao WhatsApp</p>
                       </div>
                     </div>
                   )}
