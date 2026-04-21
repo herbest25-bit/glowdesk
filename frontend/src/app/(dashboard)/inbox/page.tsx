@@ -449,6 +449,7 @@ export default function InboxPage() {
     socket.on('new_message', ({ conversationId, message }: any) => {
       if (selected?.id === conversationId) {
         setMessages(prev => {
+          if (prev.some(m => m.id === message.id)) return prev  // evita duplicata
           const updated = [...prev, message]
           if (message.direction === 'inbound') {
             if (bantTimerRef.current) clearTimeout(bantTimerRef.current)
@@ -540,7 +541,7 @@ export default function InboxPage() {
         media_mimetype: file.type,
         media_filename: file.name,
       })
-      setMessages(prev => [...prev, msg.message])
+      setMessages(prev => prev.some(m => m.id === msg.message.id) ? prev : [...prev, msg.message])
     } catch (e) { console.error('Erro ao enviar arquivo:', e) }
     finally { setSending(false) }
   }
@@ -697,7 +698,7 @@ export default function InboxPage() {
     setNewMessage('')
     try {
       const res = await api.post(`/api/conversations/${selected.id}/messages`, { content: text })
-      setMessages(prev => [...prev, res.message])
+      setMessages(prev => prev.some(m => m.id === res.message.id) ? prev : [...prev, res.message])
     } catch (err: unknown) {
       setNewMessage(text)
       setSendError(err instanceof Error ? err.message : 'Erro ao enviar mensagem')
