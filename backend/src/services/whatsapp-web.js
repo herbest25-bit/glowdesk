@@ -1,14 +1,18 @@
-import * as BaileysPkg from '@whiskeysockets/baileys'
+import { createRequire } from 'module'
 import qrcode from 'qrcode'
 import { db } from '../utils/db.js'
 import { getIO } from './realtime.js'
 
-const makeWASocket       = BaileysPkg.default || BaileysPkg.makeWASocket
-const DisconnectReason   = BaileysPkg.DisconnectReason
-const initAuthCreds      = BaileysPkg.initAuthCreds
-const BufferJSON         = BaileysPkg.BufferJSON
-const downloadMediaMessage = BaileysPkg.downloadMediaMessage
+const require = createRequire(import.meta.url)
+const Baileys = require('@whiskeysockets/baileys')
 
+const makeWASocket       = Baileys.makeWASocket || Baileys.default?.makeWASocket || Baileys.default
+const DisconnectReason   = Baileys.DisconnectReason   || Baileys.default?.DisconnectReason
+const initAuthCreds      = Baileys.initAuthCreds      || Baileys.default?.initAuthCreds
+const BufferJSON         = Baileys.BufferJSON          || Baileys.default?.BufferJSON
+const downloadMediaMessage = Baileys.downloadMediaMessage || Baileys.default?.downloadMediaMessage
+
+console.log('[Baileys] exports keys:', Object.keys(Baileys).slice(0, 10).join(', '))
 console.log('[Baileys] makeWASocket:', typeof makeWASocket)
 
 // ─── Estado em memória ────────────────────────────────────────────────────────
