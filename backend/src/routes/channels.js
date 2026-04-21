@@ -49,6 +49,11 @@ export default async function channelsRoutes(fastify) {
     )
     if (!result.rows.length) return reply.code(404).send({ error: 'Canal não encontrado' })
 
+    // Destruir sessão ativa e apagar credenciais antigas para forçar novo QR
+    await destroySession(id)
+    await db.query(`DELETE FROM channel_sessions WHERE session_id = $1`, [`wab-${id}`])
+    await db.query(`UPDATE channels SET status = 'connecting', updated_at = NOW() WHERE id = $1`, [id])
+
     // Iniciar sessão em background (QR chega via socket)
     startSession(id, workspaceId).catch(async (e) => {
       console.error('[Channels] Erro ao iniciar sessão:', e.message)

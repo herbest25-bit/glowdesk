@@ -1,11 +1,13 @@
-FROM node:20-alpine
+FROM node:20-slim
 
-RUN apk add --no-cache python3 make g++ git
+RUN apt-get update -y && apt-get install -y --no-install-recommends \
+    git python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY package.json ./
-RUN npm install --production --prefer-online
+RUN npm install --production
 
 COPY src ./src
 
