@@ -6,14 +6,15 @@ import { getIO } from './realtime.js'
 const require = createRequire(import.meta.url)
 const Baileys = require('@whiskeysockets/baileys')
 
-const makeWASocket       = Baileys.makeWASocket || Baileys.default?.makeWASocket || Baileys.default
-const DisconnectReason   = Baileys.DisconnectReason   || Baileys.default?.DisconnectReason
-const initAuthCreds      = Baileys.initAuthCreds      || Baileys.default?.initAuthCreds
-const BufferJSON         = Baileys.BufferJSON          || Baileys.default?.BufferJSON
-const downloadMediaMessage = Baileys.downloadMediaMessage || Baileys.default?.downloadMediaMessage
+const makeWASocket           = Baileys.makeWASocket || Baileys.default?.makeWASocket || Baileys.default
+const DisconnectReason       = Baileys.DisconnectReason   || Baileys.default?.DisconnectReason
+const initAuthCreds          = Baileys.initAuthCreds      || Baileys.default?.initAuthCreds
+const BufferJSON             = Baileys.BufferJSON          || Baileys.default?.BufferJSON
+const downloadMediaMessage   = Baileys.downloadMediaMessage || Baileys.default?.downloadMediaMessage
+const fetchLatestBaileysVersion = Baileys.fetchLatestBaileysVersion || Baileys.default?.fetchLatestBaileysVersion
+const Browsers               = Baileys.Browsers || Baileys.default?.Browsers
 
-console.log('[Baileys] exports keys:', Object.keys(Baileys).slice(0, 10).join(', '))
-console.log('[Baileys] makeWASocket:', typeof makeWASocket)
+console.log('[Baileys] makeWASocket:', typeof makeWASocket, '| fetchLatestVersion:', typeof fetchLatestBaileysVersion)
 
 // ─── Estado em memória ────────────────────────────────────────────────────────
 const sessions    = new Map()   // channelId → session object
@@ -114,11 +115,24 @@ export async function startSession(channelId, workspaceId) {
   const { state, save } = await loadAuth(channelId)
   const token = Symbol()
 
+  // Buscar versão atual do WhatsApp Web (evita code=405 por versão desatualizada)
+  let waVersion = [2, 3000, 1015920988]
+  try {
+    if (fetchLatestBaileysVersion) {
+      const { version } = await fetchLatestBaileysVersion()
+      waVersion = version
+      console.log(`[WA] versão WA obtida: ${version.join('.')}`)
+    }
+  } catch (e) {
+    console.log('[WA] fetchLatestBaileysVersion falhou, usando versão padrão:', e.message)
+  }
+
   console.log(`[WA] makeWASocket iniciando canal=${channelId}`)
   const sock = makeWASocket({
+    version: waVersion,
     auth: state,
     logger,
-    browser: ['GlowDesk', 'Chrome', '1.0'],
+    browser: Browsers?.ubuntu('Chrome') || ['Ubuntu', 'Chrome', '22.1.0'],
     printQRInTerminal: true,
     connectTimeoutMs: 120_000,
     defaultQueryTimeoutMs: 120_000,
