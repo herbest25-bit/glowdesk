@@ -119,6 +119,19 @@ try {
   console.log('[Migration] channel_sessions key rename: OK')
 } catch (e) { console.log('[Migration] channel_sessions rename ERRO:', e.message) }
 
+// Preencher channel_id em conversas antigas que não têm
+try {
+  await db.query(`
+    UPDATE conversations c
+    SET channel_id = ch.id
+    FROM channels ch
+    WHERE c.channel_id IS NULL
+      AND ch.workspace_id = c.workspace_id
+      AND ch.status = 'connected'
+  `)
+  console.log('[Migration] conversations.channel_id backfill: OK')
+} catch (e) { console.log('[Migration] conversations.channel_id backfill ERRO:', e.message) }
+
 // ── Corrigir hashes SHA256 → bcrypt e garantir admin ──────────
 try {
   // Usuários com hash não-bcrypt (SHA256 do create-admin.js antigo)
