@@ -102,6 +102,8 @@ type Conversation = {
   tags: string[]
   lead_score: number
   assigned_name?: string
+  channel_name?: string
+  channel_phone?: string
 }
 
 type Message = {
@@ -170,6 +172,11 @@ function KanbanView({ conversations, onSelect }: { conversations: Conversation[]
                           ? <span className="flex items-center gap-1 text-[10px] text-slate-400"><User className="w-3 h-3" />{conv.assigned_name}</span>
                           : <span className="text-[10px] text-slate-500">Sem agente</span>
                         }
+                        {conv.channel_name && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style={{ background: 'rgba(124,58,237,0.15)', color: '#a78bfa' }}>
+                            {conv.channel_name}
+                          </span>
+                        )}
                       </div>
                       {conv.last_message_at && (
                         <span className="text-[10px] text-slate-500">

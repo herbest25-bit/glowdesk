@@ -16,7 +16,7 @@ export async function conversationRoutes(fastify) {
     const { status, assignedTo, search, page = 1, limit = 30 } = req.query
     const offset = (page - 1) * limit
 
-    let where = ['c.workspace_id = $1', "ct.phone NOT LIKE 'status%'", "COALESCE(ct.name,'') NOT ILIKE '%broadcast%'"]
+    let where = ['c.workspace_id = $1', "ct.phone NOT LIKE 'status%'", "COALESCE(ct.name,'') NOT ILIKE '%broadcast%'", "ct.phone NOT LIKE '%@g.us'", "ct.phone NOT LIKE '%@newsletter'", "ct.phone NOT LIKE '%@broadcast'"]
     const params = [workspaceId]
     let i = 2
 
@@ -32,11 +32,13 @@ export async function conversationRoutes(fastify) {
               ct.name as contact_name, ct.phone as contact_phone, ct.avatar_url,
               ct.tags, ct.lead_score,
               u.name as assigned_name,
-              wn.display_name as inbox_name
+              wn.display_name as inbox_name,
+              ch.name as channel_name, ch.phone_number as channel_phone
        FROM conversations c
        JOIN contacts ct ON ct.id = c.contact_id
        LEFT JOIN users u ON u.id = c.assigned_to
        LEFT JOIN whatsapp_numbers wn ON wn.id = c.whatsapp_number_id
+       LEFT JOIN channels ch ON ch.id = c.channel_id
        WHERE ${where.join(' AND ')}
        ORDER BY c.last_message_at DESC NULLS LAST
        LIMIT $${i} OFFSET $${i + 1}`,
