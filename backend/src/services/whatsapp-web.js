@@ -237,6 +237,7 @@ export async function startSession(channelId, workspaceId) {
         if (!jid || jid.includes('status@broadcast')) continue
 
         const isGroup = jid.endsWith('@g.us')
+        if (isGroup) continue  // ignorar mensagens de grupo — só processar chats individuais
         const phone   = jid.replace('@g.us','').replace('@s.whatsapp.net','').replace('@c.us','')
         if (!phone) continue
 
