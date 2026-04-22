@@ -4,7 +4,7 @@ import { api } from '@/lib/api'
 import { getSocket } from '@/lib/socket'
 import {
   Phone, Plus, X, CheckCircle, XCircle, Wifi, WifiOff,
-  RefreshCw, Trash2, Edit2, Check, RotateCcw
+  RefreshCw, Trash2, Edit2, Check, RotateCcw, LogOut
 } from 'lucide-react'
 
 type Channel = {
@@ -172,6 +172,14 @@ export default function ChannelsPage() {
     }
   }
 
+  async function disconnectChannel(id: string) {
+    if (!confirm('Desconectar este canal? O canal será mantido mas a sessão WhatsApp será encerrada.')) return
+    try {
+      await api.post(`/api/channels/${id}/disconnect`, {})
+      setChannels(c => c.map(ch => ch.id === id ? { ...ch, status: 'disconnected', phone_number: null } : ch))
+    } catch (e) { console.error(e) }
+  }
+
   async function deleteChannel(id: string) {
     if (!confirm('Desconectar e remover este canal?')) return
     try {
@@ -292,6 +300,18 @@ export default function ChannelsPage() {
                 </div>
 
                 <div className="flex items-center gap-2 flex-shrink-0">
+                  {ch.status !== 'disconnected' && (
+                    <button
+                      onClick={() => disconnectChannel(ch.id)}
+                      className="p-2 rounded-lg transition-colors"
+                      style={{ color: '#5a5a6e' }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(245,158,11,0.12)'; (e.currentTarget as HTMLElement).style.color = '#fcd34d' }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = ''; (e.currentTarget as HTMLElement).style.color = '#5a5a6e' }}
+                      title="Desconectar sessão"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                   <button
                     onClick={() => reconnectChannel(ch)}
                     disabled={reconnectingId === ch.id}

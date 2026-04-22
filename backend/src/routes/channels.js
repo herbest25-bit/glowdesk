@@ -103,6 +103,24 @@ export default async function channelsRoutes(fastify) {
     return { channel: result.rows[0] }
   })
 
+  // POST /api/channels/:id/disconnect — desconectar sem remover
+  fastify.post('/api/channels/:id/disconnect', async (req, reply) => {
+    const { workspaceId } = req.user
+    const { id } = req.params
+    const result = await db.query(
+      `SELECT * FROM channels WHERE id = $1 AND workspace_id = $2`,
+      [id, workspaceId]
+    )
+    if (!result.rows.length) return reply.code(404).send({ error: 'Canal não encontrado' })
+    await destroySession(id)
+    await db.query(`DELETE FROM channel_sessions WHERE session_id = $1`, [`wab-${id}`])
+    await db.query(`UPDATE channels SET status='disconnected', phone_number=NULL, updated_at=NOW() WHERE id=$1`, [id])
+    const { getIO } = await import('../services/realtime.js')
+    const io = getIO()
+    if (io) io.to(`workspace:${workspaceId}`).emit('channel_disconnected', { channelId: id })
+    return { ok: true }
+  })
+
   // DELETE /api/channels/:id — desconectar e remover canal
   fastify.delete('/api/channels/:id', async (req, reply) => {
     const { workspaceId } = req.user
