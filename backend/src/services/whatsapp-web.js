@@ -232,12 +232,53 @@ export async function startSession(channelId, workspaceId) {
     if (type !== 'notify') return
     for (const msg of msgs) {
       try {
-        if (msg.key.fromMe) continue
         const jid = msg.key.remoteJid || ''
         if (!jid || jid.includes('status@broadcast')) continue
 
         const isGroup = jid.endsWith('@g.us') || jid.endsWith('@newsletter') || jid.includes('@broadcast')
         if (isGroup) continue  // ignorar grupos, newsletters e broadcasts
+
+        // Mensagens enviadas pelo próprio WhatsApp (fromMe): salvar como outbound
+        // mas verificar duplicata pelo whatsapp_message_id para não duplicar mensagens do GlowDesk
+        if (msg.key.fromMe) {
+          const msgId = msg.key.id
+          if (!msgId) continue
+          const dup = await db.query(`SELECT id FROM messages WHERE whatsapp_message_id = $1`, [msgId])
+          if (dup.rows.length) continue // já salvo pelo GlowDesk
+          const phone = jid.replace('@s.whatsapp.net','').replace('@c.us','').replace('@g.us','')
+          if (!phone) continue
+          const { rows: [contact] } = await db.query(
+            `SELECT * FROM contacts WHERE workspace_id=$1 AND phone=$2 LIMIT 1`,
+            [workspaceId, phone]
+          )
+          if (!contact) continue
+          const existing = await db.query(
+            `SELECT * FROM conversations WHERE workspace_id=$1 AND contact_id=$2 AND status!='resolved' ORDER BY created_at DESC LIMIT 1`,
+            [workspaceId, contact.id]
+          )
+          if (!existing.rows.length) continue
+          const conv = existing.rows[0]
+          const m = msg.message || {}
+          const body = m.conversation || m.extendedTextMessage?.text || m.imageMessage?.caption || null
+          const { rows: [saved] } = await db.query(
+            `INSERT INTO messages (conversation_id, whatsapp_message_id, direction, sender_type, content, content_type)
+             VALUES ($1,$2,'outbound','agent',$3,'text')
+             ON CONFLICT (whatsapp_message_id) DO NOTHING RETURNING *`,
+            [conv.id, msgId, body]
+          )
+          if (saved) {
+            await db.query(
+              `UPDATE conversations SET last_message=$1, last_message_at=NOW(), updated_at=NOW() WHERE id=$2`,
+              [body || '[mídia]', conv.id]
+            )
+            const io = getIO()
+            if (io) io.to(`workspace:${workspaceId}`).emit('new_message', {
+              conversationId: conv.id, message: saved, contact
+            })
+          }
+          continue
+        }
+
         const phone   = jid.replace('@g.us','').replace('@s.whatsapp.net','').replace('@c.us','')
         if (!phone) continue
 

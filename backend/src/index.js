@@ -108,6 +108,10 @@ try {
   console.log('[Migration] messages.media_url: OK')
 } catch (e) { console.log('[Migration] messages.media_url ERRO:', e.message) }
 try {
+  await db.query(`CREATE UNIQUE INDEX IF NOT EXISTS messages_whatsapp_message_id_idx ON messages(whatsapp_message_id) WHERE whatsapp_message_id IS NOT NULL`)
+  console.log('[Migration] messages.whatsapp_message_id unique index: OK')
+} catch (e) { console.log('[Migration] messages unique index ERRO:', e.message) }
+try {
   // Migrar chave de sessão baileys-{id} → wab-{id}
   await db.query(`
     INSERT INTO channel_sessions (session_id, session_data, updated_at)
