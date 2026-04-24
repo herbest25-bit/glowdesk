@@ -242,31 +242,33 @@ export async function startSession(channelId, workspaceId) {
         if (isGroup) continue  // ignorar grupos, newsletters e broadcasts
 
         // Mensagens enviadas pelo próprio WhatsApp (fromMe): salvar como outbound
-        // mas verificar duplicata pelo whatsapp_message_id para não duplicar mensagens do GlowDesk
         if (msg.key.fromMe) {
           const msgId = msg.key.id
           if (!msgId) continue
-          const dup = await db.query(`SELECT id FROM messages WHERE whatsapp_message_id = $1`, [msgId])
-          if (dup.rows.length) continue // já salvo pelo GlowDesk
-          const phone = jid.replace('@s.whatsapp.net','').replace('@c.us','').replace('@g.us','')
-          if (!phone) continue
-          const { rows: [contact] } = await db.query(
-            `SELECT * FROM contacts WHERE workspace_id=$1 AND phone=$2 LIMIT 1`,
-            [workspaceId, phone]
+          // Verificar duplicata (mensagem já salva pelo GlowDesk ou echo anterior)
+          const dup = await db.query(`SELECT id FROM messages WHERE whatsapp_message_id = $1 LIMIT 1`, [msgId])
+          if (dup.rows.length) continue
+          // Normalizar phone — remover qualquer sufixo @xxx
+          const rawPhone = jid.split('@')[0]
+          if (!rawPhone) continue
+          // Buscar contato por phone exato ou por phone sem sufixo
+          const contactRes = await db.query(
+            `SELECT * FROM contacts WHERE workspace_id=$1 AND (phone=$2 OR phone=$3) LIMIT 1`,
+            [workspaceId, jid, rawPhone]
           )
-          if (!contact) continue
-          const existing = await db.query(
+          if (!contactRes.rows.length) continue
+          const contact = contactRes.rows[0]
+          const convRes = await db.query(
             `SELECT * FROM conversations WHERE workspace_id=$1 AND contact_id=$2 AND status!='resolved' ORDER BY created_at DESC LIMIT 1`,
             [workspaceId, contact.id]
           )
-          if (!existing.rows.length) continue
-          const conv = existing.rows[0]
+          if (!convRes.rows.length) continue
+          const conv = convRes.rows[0]
           const m = msg.message || {}
-          const body = m.conversation || m.extendedTextMessage?.text || m.imageMessage?.caption || null
+          const body = m.conversation || m.extendedTextMessage?.text || m.imageMessage?.caption || m.videoMessage?.caption || null
           const { rows: [saved] } = await db.query(
             `INSERT INTO messages (conversation_id, whatsapp_message_id, direction, sender_type, content, content_type)
-             VALUES ($1,$2,'outbound','agent',$3,'text')
-             ON CONFLICT (whatsapp_message_id) DO NOTHING RETURNING *`,
+             VALUES ($1,$2,'outbound','agent',$3,'text') RETURNING *`,
             [conv.id, msgId, body]
           )
           if (saved) {
@@ -278,11 +280,12 @@ export async function startSession(channelId, workspaceId) {
             if (io) io.to(`workspace:${workspaceId}`).emit('new_message', {
               conversationId: conv.id, message: saved, contact
             })
+            console.log(`[WA] fromMe salvo: ${rawPhone} → "${String(body).substring(0,40)}"`)
           }
           continue
         }
 
-        const phone   = jid.replace('@g.us','').replace('@s.whatsapp.net','').replace('@c.us','')
+        const phone   = jid.split('@')[0]
         if (!phone) continue
 
         let contactName = msg.pushName || null
