@@ -908,10 +908,10 @@ export default function InboxPage() {
                       )}
                     </div>
                   </div>
-                  {viewingMap[conv.id] ? (
-                    <p className="text-[10px] font-medium mt-0.5 flex items-center gap-1" style={{ color: '#34d399' }}>
+                  {(viewingMap[conv.id] || (!conv.ai_mode && conv.assigned_name)) ? (
+                    <p className="text-[10px] font-semibold mt-0.5 flex items-center gap-1" style={{ color: '#34d399' }}>
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block animate-pulse" />
-                      Em atendimento por {viewingMap[conv.id]}
+                      Em atendimento por {viewingMap[conv.id] || conv.assigned_name}
                     </p>
                   ) : (
                     <p className="text-xs text-slate-500 truncate mt-0.5">{conv.last_message}</p>
@@ -930,11 +930,6 @@ export default function InboxPage() {
                         <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold"
                           style={{ background: 'rgba(124,58,237,0.18)', color: '#c4b5fd', border: '1px solid rgba(124,58,237,0.25)' }}>
                           {conv.channel_name}
-                        </span>
-                      )}
-                      {conv.assigned_name && !conv.ai_mode && (
-                        <span className="flex items-center gap-0.5 text-[10px]" style={{ color: '#6ee7b7' }}>
-                          <User className="w-2.5 h-2.5" />{conv.assigned_name}
                         </span>
                       )}
                     </div>
