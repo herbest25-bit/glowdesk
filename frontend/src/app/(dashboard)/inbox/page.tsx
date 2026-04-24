@@ -518,15 +518,15 @@ export default function InboxPage() {
   }
 
   async function selectConversation(conv: Conversation) {
-    const socket = getSocket(user.workspaceId)
-    // Avisar que parou de ver a conversa anterior
-    if (selectedRef.current && selectedRef.current.id !== conv.id) {
-      socket.emit('conversation_viewing_stopped', { conversationId: selectedRef.current.id, workspaceId: user.workspaceId })
-    }
+    try {
+      const socket = getSocket(user.workspaceId)
+      if (selectedRef.current && selectedRef.current.id !== conv.id) {
+        socket.emit('conversation_viewing_stopped', { conversationId: selectedRef.current.id, workspaceId: user.workspaceId })
+      }
+      socket.emit('conversation_viewing', { conversationId: conv.id, agentName: user.name || 'Agente', workspaceId: user.workspaceId })
+    } catch {}
     selectedRef.current = conv
     setSelected(conv)
-    // Avisar que está vendo esta conversa
-    socket.emit('conversation_viewing', { conversationId: conv.id, agentName: user.name || 'Agente', workspaceId: user.workspaceId })
     setBantData(null)
     setView('list')
     const data = await api.get(`/api/conversations/${conv.id}/messages`)

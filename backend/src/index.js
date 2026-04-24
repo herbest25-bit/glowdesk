@@ -132,6 +132,77 @@ try {
   console.log('[Migration] conversations.channel_id backfill: OK')
 } catch (e) { console.log('[Migration] conversations.channel_id backfill ERRO:', e.message) }
 
+// ── Garantir tabelas de pipeline e pipeline padrão ────────────
+try {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS pipelines (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      name VARCHAR(255) NOT NULL DEFAULT 'Pipeline de Vendas',
+      is_default BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `)
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS pipeline_stages (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      pipeline_id UUID NOT NULL REFERENCES pipelines(id) ON DELETE CASCADE,
+      name VARCHAR(255) NOT NULL,
+      color VARCHAR(50) DEFAULT '#7c3aed',
+      position INTEGER DEFAULT 0,
+      is_won BOOLEAN DEFAULT false,
+      is_lost BOOLEAN DEFAULT false,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `)
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS deals (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      contact_id UUID REFERENCES contacts(id) ON DELETE SET NULL,
+      pipeline_id UUID REFERENCES pipelines(id) ON DELETE CASCADE,
+      stage_id UUID REFERENCES pipeline_stages(id) ON DELETE SET NULL,
+      assigned_to UUID REFERENCES users(id) ON DELETE SET NULL,
+      title VARCHAR(255) NOT NULL,
+      value NUMERIC(12,2) DEFAULT 0,
+      status VARCHAR(20) DEFAULT 'open',
+      lost_reason TEXT,
+      expected_close_date DATE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `)
+  // Criar pipeline padrão para workspaces que não têm
+  const workspaces = await db.query(`SELECT id FROM workspaces`)
+  for (const ws of workspaces.rows) {
+    const existing = await db.query(`SELECT id FROM pipelines WHERE workspace_id=$1 LIMIT 1`, [ws.id])
+    if (!existing.rows.length) {
+      const pipe = await db.query(
+        `INSERT INTO pipelines (workspace_id, name, is_default) VALUES ($1,'Pipeline de Vendas',true) RETURNING id`,
+        [ws.id]
+      )
+      const pid = pipe.rows[0].id
+      const stages = [
+        { name: 'Primeiro Contato', color: '#7c3aed', pos: 0 },
+        { name: 'Qualificação',     color: '#0891b2', pos: 1 },
+        { name: 'Proposta Enviada', color: '#ca8a04', pos: 2 },
+        { name: 'Negociação',       color: '#ea580c', pos: 3 },
+        { name: 'Fechado',          color: '#16a34a', pos: 4, won: true },
+        { name: 'Perdido',          color: '#dc2626', pos: 5, lost: true },
+      ]
+      for (const s of stages) {
+        await db.query(
+          `INSERT INTO pipeline_stages (pipeline_id,name,color,position,is_won,is_lost) VALUES ($1,$2,$3,$4,$5,$6)`,
+          [pid, s.name, s.color, s.pos, s.won||false, s.lost||false]
+        )
+      }
+      console.log(`[Migration] Pipeline padrão criado para workspace ${ws.id}`)
+    }
+  }
+  console.log('[Migration] pipeline tables: OK')
+} catch (e) { console.log('[Migration] pipeline ERRO:', e.message) }
+
 // ── Corrigir hashes SHA256 → bcrypt e garantir admin ──────────
 try {
   // Usuários com hash não-bcrypt (SHA256 do create-admin.js antigo)
