@@ -427,6 +427,8 @@ export default function InboxPage() {
   const [selectMode, setSelectMode] = useState(false)
   const [selectedMsgs, setSelectedMsgs] = useState<Set<string>>(new Set())
   const [showMoreMenu, setShowMoreMenu] = useState(false)
+  const [viewingMap, setViewingMap] = useState<Record<string, string>>({}) // conversationId → agentName
+  const selectedRef = useRef<Conversation | null>(null)
 
   const user = typeof window !== 'undefined'
     ? JSON.parse(localStorage.getItem('user') || '{}')
@@ -486,6 +488,12 @@ export default function InboxPage() {
         setNoChannelActive(!d.activeSessions || d.activeSessions.length === 0)
       }).catch(() => {})
     })
+    socket.on('conversation_viewing', ({ conversationId, agentName }: any) => {
+      setViewingMap(prev => ({ ...prev, [conversationId]: agentName }))
+    })
+    socket.on('conversation_viewing_stopped', ({ conversationId }: any) => {
+      setViewingMap(prev => { const n = { ...prev }; delete n[conversationId]; return n })
+    })
     return () => {
       socket.off('new_message')
       socket.off('conversation_updated')
@@ -493,6 +501,8 @@ export default function InboxPage() {
       socket.off('channel_qrcode')
       socket.off('channel_connected')
       socket.off('channel_disconnected')
+      socket.off('conversation_viewing')
+      socket.off('conversation_viewing_stopped')
     }
   }, [selected?.id])
 
@@ -508,7 +518,15 @@ export default function InboxPage() {
   }
 
   async function selectConversation(conv: Conversation) {
+    const socket = getSocket(user.workspaceId)
+    // Avisar que parou de ver a conversa anterior
+    if (selectedRef.current && selectedRef.current.id !== conv.id) {
+      socket.emit('conversation_viewing_stopped', { conversationId: selectedRef.current.id, workspaceId: user.workspaceId })
+    }
+    selectedRef.current = conv
     setSelected(conv)
+    // Avisar que está vendo esta conversa
+    socket.emit('conversation_viewing', { conversationId: conv.id, agentName: user.name || 'Agente', workspaceId: user.workspaceId })
     setBantData(null)
     setView('list')
     const data = await api.get(`/api/conversations/${conv.id}/messages`)
@@ -890,7 +908,14 @@ export default function InboxPage() {
                       )}
                     </div>
                   </div>
-                  <p className="text-xs text-slate-500 truncate mt-0.5">{conv.last_message}</p>
+                  {viewingMap[conv.id] ? (
+                    <p className="text-[10px] font-medium mt-0.5 flex items-center gap-1" style={{ color: '#34d399' }}>
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block animate-pulse" />
+                      Em atendimento por {viewingMap[conv.id]}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-slate-500 truncate mt-0.5">{conv.last_message}</p>
+                  )}
                   <div className="flex items-center justify-between mt-1">
                     <div className="flex items-center gap-1 flex-wrap">
                       <span className={`badge text-xs ${

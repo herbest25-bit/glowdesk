@@ -10,20 +10,38 @@ export function initRealtime(httpServer) {
     }
   })
 
+  // conversationId → { agentName, workspaceId }
+  const viewing = new Map()
+
   io.on('connection', (socket) => {
     console.log(`[Socket] Cliente conectado: ${socket.id}`)
 
-    // Agente entra na sala do workspace
     socket.on('join_workspace', ({ workspaceId }) => {
       socket.join(`workspace:${workspaceId}`)
     })
 
-    // Agente entra em uma conversa específica
     socket.on('join_conversation', ({ conversationId }) => {
       socket.join(`conversation:${conversationId}`)
     })
 
+    // Agente abre uma conversa
+    socket.on('conversation_viewing', ({ conversationId, agentName, workspaceId }) => {
+      viewing.set(socket.id, { conversationId, agentName, workspaceId })
+      socket.to(`workspace:${workspaceId}`).emit('conversation_viewing', { conversationId, agentName })
+    })
+
+    // Agente fecha / troca de conversa
+    socket.on('conversation_viewing_stopped', ({ conversationId, workspaceId }) => {
+      viewing.delete(socket.id)
+      socket.to(`workspace:${workspaceId}`).emit('conversation_viewing_stopped', { conversationId })
+    })
+
     socket.on('disconnect', () => {
+      const info = viewing.get(socket.id)
+      if (info) {
+        io.to(`workspace:${info.workspaceId}`).emit('conversation_viewing_stopped', { conversationId: info.conversationId })
+        viewing.delete(socket.id)
+      }
       console.log(`[Socket] Cliente desconectado: ${socket.id}`)
     })
   })
