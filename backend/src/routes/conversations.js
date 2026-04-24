@@ -118,10 +118,11 @@ export async function conversationRoutes(fastify) {
       channelId = activeSessions[0]
     }
 
+    let waMessageId = null
+
     if (channelId) {
       // WhatsApp Web
       let client = getSession(channelId)
-      // Se o canal salvo não está mais ativo, tenta qualquer sessão disponível
       if (!client && activeSessions.length > 0) {
         channelId = activeSessions[0]
         client = getSession(channelId)
@@ -130,12 +131,11 @@ export async function conversationRoutes(fastify) {
       if (!client) return reply.status(400).send({ error: 'Canal WhatsApp não está conectado. Vá em Canais e reconecte.' })
       try {
         const { media_base64, media_mimetype, media_filename } = req.body
+        const jid = conv.is_group ? `${conv.phone}@g.us` : `${conv.phone}@c.us`
         if (media_base64 && media_mimetype) {
-          const jid = conv.is_group ? `${conv.phone}@g.us` : `${conv.phone}@c.us`
-          await client.sendMedia(jid, media_base64, media_mimetype, media_filename)
+          waMessageId = await client.sendMedia(jid, media_base64, media_mimetype, media_filename)
         } else {
-          const jid = conv.is_group ? `${conv.phone}@g.us` : `${conv.phone}@c.us`
-          await client.sendMessage(jid, content)
+          waMessageId = await client.sendMessage(jid, content)
         }
       } catch (sendErr) {
         console.error('[Send] Erro ao enviar via WhatsApp Web:', sendErr.message)
@@ -153,12 +153,12 @@ export async function conversationRoutes(fastify) {
       return reply.status(400).send({ error: 'Nenhum canal disponível para envio' })
     }
 
-    // Salvar no banco
+    // Salvar no banco — whatsapp_message_id evita duplicata do echo fromMe do Baileys
     const msgResult = await db.query(
-      `INSERT INTO messages (conversation_id, direction, sender_type, sender_id, content, content_type)
-       VALUES ($1, 'outbound', 'agent', $2, $3, 'text')
+      `INSERT INTO messages (conversation_id, direction, sender_type, sender_id, content, content_type, whatsapp_message_id)
+       VALUES ($1, 'outbound', 'agent', $2, $3, 'text', $4)
        RETURNING *`,
-      [id, userId, content]
+      [id, userId, content, waMessageId]
     )
 
     await db.query(

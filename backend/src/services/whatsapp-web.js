@@ -148,7 +148,8 @@ export async function startSession(channelId, workspaceId) {
       const suffix = jid.endsWith('@g.us') ? '@g.us' : '@s.whatsapp.net'
       const normalJid = `${phone}${suffix}`
       console.log(`[WA] sendMessage → ${normalJid} | text: "${String(text).substring(0, 40)}"`)
-      await sock.sendMessage(normalJid, { text: String(text) })
+      const result = await sock.sendMessage(normalJid, { text: String(text) })
+      return result?.key?.id || null
     },
     async sendMedia(jid, base64, mimetype, filename) {
       const phone  = jid.split('@')[0]
@@ -161,7 +162,8 @@ export async function startSession(channelId, workspaceId) {
                  : 'document'
       const payload = { [type]: buf, mimetype }
       if (type === 'document') payload.fileName = filename || 'arquivo'
-      await sock.sendMessage(j, payload)
+      const result = await sock.sendMessage(j, payload)
+      return result?.key?.id || null
     }
   }
 
