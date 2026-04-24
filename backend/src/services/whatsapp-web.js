@@ -2,6 +2,7 @@ import { createRequire } from 'module'
 import qrcode from 'qrcode'
 import { db } from '../utils/db.js'
 import { getIO } from './realtime.js'
+import { processMessage } from '../agents/sales-agent.js'
 
 const require = createRequire(import.meta.url)
 const Baileys = require('@whiskeysockets/baileys')
@@ -360,7 +361,53 @@ export async function startSession(channelId, workspaceId) {
           conversationId: conversation.id, message: saved, contact
         })
 
-        // 7. Criar deal automático se necessário
+        // 7. Processar com IA (Glow) se ai_mode ativo e mensagem de texto
+        if (conversation.ai_mode && body && contentType === 'text') {
+          try {
+            const wsSettings = await db.query(`SELECT settings FROM workspaces WHERE id=$1`, [workspaceId])
+            const glowActive = wsSettings.rows[0]?.settings?.glow_active !== false
+            if (glowActive) {
+              const historyResult = await db.query(
+                `SELECT direction, content FROM messages
+                 WHERE conversation_id=$1 ORDER BY created_at DESC LIMIT 20`,
+                [conversation.id]
+              )
+              const history = historyResult.rows.reverse()
+              const aiResponse = await processMessage({ contact, conversation, message: body, history })
+              if (aiResponse?.message) {
+                // Enviar via WhatsApp
+                const suffix = jid.endsWith('@g.us') ? '@g.us' : '@s.whatsapp.net'
+                const sendJid = `${phone}${suffix}`
+                const waId = await session.sendMessage(sendJid, aiResponse.message)
+                // Salvar resposta da IA
+                const { rows: [aiMsg] } = await db.query(
+                  `INSERT INTO messages (conversation_id, direction, sender_type, content, content_type, whatsapp_message_id)
+                   VALUES ($1,'outbound','ai',$2,'text',$3) RETURNING *`,
+                  [conversation.id, aiResponse.message, waId]
+                )
+                await db.query(
+                  `UPDATE conversations SET last_message=$1, last_message_at=NOW(), updated_at=NOW() WHERE id=$2`,
+                  [aiResponse.message.substring(0, 200), conversation.id]
+                )
+                if (io) io.to(`workspace:${workspaceId}`).emit('new_message', {
+                  conversationId: conversation.id, message: aiMsg, contact
+                })
+                // Transferir para humano se IA sinalizou
+                if (aiResponse.signals?.transferToHuman) {
+                  await db.query(
+                    `UPDATE conversations SET ai_mode=false, status='pending', updated_at=NOW() WHERE id=$1`,
+                    [conversation.id]
+                  )
+                  if (io) io.to(`workspace:${workspaceId}`).emit('transfer_to_human', { conversationId: conversation.id })
+                }
+              }
+            }
+          } catch (aiErr) {
+            console.error('[WA] AI processing error:', aiErr.message)
+          }
+        }
+
+        // 8. Criar deal automático se necessário
         try {
           const deal = await db.query(
             `SELECT id FROM deals WHERE contact_id=$1 AND workspace_id=$2 AND status='open' LIMIT 1`,
