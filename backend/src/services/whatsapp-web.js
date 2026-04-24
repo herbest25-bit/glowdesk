@@ -265,11 +265,28 @@ export async function startSession(channelId, workspaceId) {
           if (!convRes.rows.length) continue
           const conv = convRes.rows[0]
           const m = msg.message || {}
-          const body = m.conversation || m.extendedTextMessage?.text || m.imageMessage?.caption || m.videoMessage?.caption || null
+          const body = m.conversation || m.extendedTextMessage?.text
+                    || m.imageMessage?.caption || m.videoMessage?.caption || null
+          // Detectar tipo e baixar mídia se necessário
+          let contentType = 'text'
+          let mediaUrl = null
+          if (m.imageMessage || m.videoMessage || m.audioMessage || m.pttMessage || m.documentMessage || m.stickerMessage) {
+            contentType = m.imageMessage ? 'image'
+                        : m.videoMessage ? 'video'
+                        : (m.audioMessage || m.pttMessage) ? 'audio'
+                        : m.documentMessage ? 'document' : 'sticker'
+            try {
+              const buf  = await downloadMediaMessage(msg, 'buffer', {})
+              const mime = m.imageMessage?.mimetype || m.videoMessage?.mimetype
+                         || m.audioMessage?.mimetype || m.pttMessage?.mimetype
+                         || m.documentMessage?.mimetype || 'application/octet-stream'
+              mediaUrl = `data:${mime};base64,${buf.toString('base64')}`
+            } catch (e) { console.error('[WA] fromMe media download error:', e.message) }
+          }
           const { rows: [saved] } = await db.query(
-            `INSERT INTO messages (conversation_id, whatsapp_message_id, direction, sender_type, content, content_type)
-             VALUES ($1,$2,'outbound','agent',$3,'text') RETURNING *`,
-            [conv.id, msgId, body]
+            `INSERT INTO messages (conversation_id, whatsapp_message_id, direction, sender_type, content, content_type, media_url)
+             VALUES ($1,$2,'outbound','agent',$3,$4,$5) RETURNING *`,
+            [conv.id, msgId, body, contentType, mediaUrl]
           )
           if (saved) {
             await db.query(
