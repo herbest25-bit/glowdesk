@@ -2285,6 +2285,7 @@ function ManageCollaborators({
   const [confirmDel, setConfirmDel] = useState<string | null>(null)
   const [form, setForm] = useState({ name: '', role: '', avatar: '#7c3aed' })
   const [error, setError] = useState('')
+  const [confirmReset, setConfirmReset] = useState<string | null>(null)
 
   const ROLES = ['Atendente', 'Consultora', 'Consultora Sênior', 'Coordenadora', 'Supervisora', 'Gerente']
 
@@ -2331,6 +2332,21 @@ function ManageCollaborators({
     setConfirmDel(null)
   }
 
+  function resetMetrics(id: string) {
+    const updated = collaborators.map(c => c.id === id ? { ...c, score: 70, sales: 0, revenue: 0, trend: 0 } : c)
+    setCollaborators(updated)
+    localStorage.setItem('team_collaborators', JSON.stringify(updated))
+    setConfirmReset(null)
+  }
+
+  function handlePhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => setForm(f => ({ ...f, avatar: reader.result as string }))
+    reader.readAsDataURL(file)
+  }
+
   return (
     <div className="space-y-5">
 
@@ -2366,10 +2382,16 @@ function ManageCollaborators({
         {collaborators.map((c, i) => (
           <div key={c.id} className="card px-5 py-4 flex items-center gap-4">
             {/* Avatar */}
-            <div className="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0"
-              style={{ background: c.avatar }}>
-              {c.name[0].toUpperCase()}
-            </div>
+            {c.avatar?.startsWith('data:') || c.avatar?.startsWith('http') ? (
+              <img src={c.avatar} alt={c.name}
+                className="w-11 h-11 rounded-full object-cover flex-shrink-0"
+                style={{ border: '2px solid rgba(124,58,237,0.3)' }} />
+            ) : (
+              <div className="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0"
+                style={{ background: c.avatar || '#7c3aed' }}>
+                {c.name[0].toUpperCase()}
+              </div>
+            )}
 
             {/* Info */}
             <div className="flex-1 min-w-0">
@@ -2405,6 +2427,29 @@ function ManageCollaborators({
               >
                 Editar
               </button>
+              {confirmReset === c.id ? (
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px]" style={{ color: '#fbbf24' }}>Zerar métricas?</span>
+                  <button onClick={() => resetMetrics(c.id)}
+                    className="px-2 py-1 rounded-lg text-xs font-medium"
+                    style={{ background: 'rgba(251,191,36,0.15)', color: '#fbbf24' }}>
+                    Sim
+                  </button>
+                  <button onClick={() => setConfirmReset(null)}
+                    className="px-2 py-1 rounded-lg text-xs font-medium"
+                    style={{ background: 'rgba(255,255,255,0.05)', color: '#8b8b9e' }}>
+                    Não
+                  </button>
+                </div>
+              ) : (
+                <button onClick={() => setConfirmReset(c.id)}
+                  className="px-2 py-1.5 rounded-lg text-xs font-medium transition-all"
+                  style={{ background: 'rgba(251,191,36,0.08)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.2)' }}
+                  title="Zerar métricas deste colaborador"
+                >
+                  Zerar
+                </button>
+              )}
               {collaborators.length > 1 && (
                 confirmDel === c.id ? (
                   <div className="flex items-center gap-1">
@@ -2457,10 +2502,16 @@ function ManageCollaborators({
             <div className="p-5 space-y-4">
               {/* Preview */}
               <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                <div className="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg"
-                  style={{ background: form.avatar }}>
-                  {form.name ? form.name[0].toUpperCase() : '?'}
-                </div>
+                {form.avatar?.startsWith('data:') || form.avatar?.startsWith('http') ? (
+                  <img src={form.avatar} alt="avatar"
+                    className="w-12 h-12 rounded-full object-cover flex-shrink-0"
+                    style={{ border: '2px solid rgba(124,58,237,0.4)' }} />
+                ) : (
+                  <div className="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg flex-shrink-0"
+                    style={{ background: form.avatar || '#7c3aed' }}>
+                    {form.name ? form.name[0].toUpperCase() : '?'}
+                  </div>
+                )}
                 <div>
                   <p className="text-sm font-semibold" style={{ color: form.name ? '#e8e8f2' : '#3a3a50' }}>
                     {form.name || 'Nome do colaborador'}
@@ -2486,9 +2537,24 @@ function ManageCollaborators({
                 </div>
               </div>
 
-              {/* Cor do avatar */}
+              {/* Foto ou cor do avatar */}
               <div>
-                <label className="text-xs font-medium block mb-2" style={{ color: '#8b8b9e' }}>Cor do avatar</label>
+                <label className="text-xs font-medium block mb-2" style={{ color: '#8b8b9e' }}>Foto ou cor do avatar</label>
+                <div className="flex items-center gap-3 mb-3">
+                  <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg cursor-pointer text-xs font-medium transition-all"
+                    style={{ background: 'rgba(124,58,237,0.15)', color: '#c4b5fd', border: '1px solid rgba(124,58,237,0.3)' }}>
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                    Enviar foto
+                    <input type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
+                  </label>
+                  {(form.avatar?.startsWith('data:') || form.avatar?.startsWith('http')) && (
+                    <button onClick={() => setForm(f => ({ ...f, avatar: '#7c3aed' }))}
+                      className="text-xs px-2 py-1 rounded-lg"
+                      style={{ background: 'rgba(239,68,68,0.1)', color: '#fca5a5' }}>
+                      Remover foto
+                    </button>
+                  )}
+                </div>
                 <div className="flex gap-2 flex-wrap">
                   {AVATAR_OPTIONS.map(color => (
                     <button key={color} onClick={() => setForm(f => ({ ...f, avatar: color }))}
