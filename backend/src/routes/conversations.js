@@ -200,6 +200,19 @@ export async function conversationRoutes(fastify) {
     return reply.send({ success: true })
   })
 
+  // Marcar como aguardando
+  fastify.patch('/conversations/:id/pending', async (req, reply) => {
+    const { workspaceId } = req.user
+    const { id } = req.params
+    await db.query(
+      `UPDATE conversations SET status = 'pending', ai_mode = false, updated_at = NOW()
+       WHERE id = $1 AND workspace_id = $2`,
+      [id, workspaceId]
+    )
+    emitToWorkspace(workspaceId, 'conversation_updated', { conversationId: id })
+    return reply.send({ success: true })
+  })
+
   // Resolver conversa
   fastify.patch('/conversations/:id/resolve', async (req, reply) => {
     const { workspaceId } = req.user

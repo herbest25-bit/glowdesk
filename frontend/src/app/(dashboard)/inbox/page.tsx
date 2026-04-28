@@ -1006,6 +1006,35 @@ export default function InboxPage() {
                   </div>
                 </div>
               </div>
+              {/* Status buttons */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={async () => {
+                    await api.patch(`/api/conversations/${selected.id}/take-over`, {})
+                    loadConversations()
+                    setSelected(prev => prev ? { ...prev, status: 'open', ai_mode: false } : null)
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all"
+                  style={selected.status === 'open' && !selected.ai_mode
+                    ? { background: 'rgba(16,185,129,0.2)', color: '#34d399', border: '1px solid rgba(16,185,129,0.35)' }
+                    : { background: 'rgba(255,255,255,0.04)', color: '#5a5a6e', border: '1px solid rgba(255,255,255,0.08)' }}>
+                  <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ background: selected.status === 'open' && !selected.ai_mode ? '#34d399' : '#3a3a50' }} />
+                  Em atendimento
+                </button>
+                <button
+                  onClick={async () => {
+                    await api.patch(`/api/conversations/${selected.id}/pending`, {})
+                    loadConversations()
+                    setSelected(prev => prev ? { ...prev, status: 'pending', ai_mode: false } : null)
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all"
+                  style={selected.status === 'pending'
+                    ? { background: 'rgba(245,158,11,0.2)', color: '#fbbf24', border: '1px solid rgba(245,158,11,0.35)' }
+                    : { background: 'rgba(255,255,255,0.04)', color: '#5a5a6e', border: '1px solid rgba(255,255,255,0.08)' }}>
+                  <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ background: selected.status === 'pending' ? '#fbbf24' : '#3a3a50' }} />
+                  Aguardando
+                </button>
+              </div>
               {/* Search bar */}
               {showChatSearch && (
                 <div className="flex items-center gap-2 bg-white/[0.03] rounded-xl px-3 py-1.5">
@@ -1041,8 +1070,27 @@ export default function InboxPage() {
                   Nenhuma mensagem ainda
                 </div>
               )}
-              {messages.filter(msg => !chatSearch || msg.content?.toLowerCase().includes(chatSearch.toLowerCase())).map(msg => (
-                <div key={msg.id} onClick={() => selectMode && toggleSelectMsg(msg.id)} className={`flex ${msg.direction === 'outbound' ? 'justify-end' : 'justify-start'} ${selectMode ? 'cursor-pointer' : ''} ${selectMode && selectedMsgs.has(msg.id) ? 'opacity-70' : ''}`}>
+              {(() => {
+                const filtered = messages.filter(msg => !chatSearch || msg.content?.toLowerCase().includes(chatSearch.toLowerCase()))
+                let lastDate = ''
+                return filtered.map(msg => {
+                  const msgDay = new Date(msg.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+                  const today = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+                  const yesterday = new Date(Date.now()-86400000).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+                  const showDate = msgDay !== lastDate
+                  lastDate = msgDay
+                  const dateLabel = msgDay === today ? 'Hoje' : msgDay === yesterday ? 'Ontem' : msgDay
+                  return (
+                    <div key={msg.id}>
+                      {showDate && (
+                        <div className="flex items-center justify-center my-3">
+                          <span className="text-[11px] font-medium px-3 py-1 rounded-full"
+                            style={{ background: 'rgba(255,255,255,0.06)', color: '#5a5a6e', border: '1px solid rgba(255,255,255,0.08)' }}>
+                            {dateLabel}
+                          </span>
+                        </div>
+                      )}
+                      <div onClick={() => selectMode && toggleSelectMsg(msg.id)} className={`flex ${msg.direction === 'outbound' ? 'justify-end' : 'justify-start'} ${selectMode ? 'cursor-pointer' : ''} ${selectMode && selectedMsgs.has(msg.id) ? 'opacity-70' : ''}`}>
                   {selectMode && (
                     <div className="flex items-center mr-2 self-center">
                       {selectedMsgs.has(msg.id) ? <CheckSquare className="w-4 h-4 text-violet-400" /> : <Square className="w-4 h-4 text-slate-600" />}
@@ -1095,8 +1143,11 @@ export default function InboxPage() {
                       {msg.direction === 'outbound' && <CheckCheck className="w-3 h-3" />}
                     </div>
                   </div>
-                </div>
-              ))}
+                      </div>
+                    </div>
+                  )
+                })
+              })()}
               <div ref={messagesEndRef} />
             </div>
 
