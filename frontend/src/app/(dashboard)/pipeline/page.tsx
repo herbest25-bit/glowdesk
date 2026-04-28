@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { api } from '@/lib/api'
+import { getSocket } from '@/lib/socket'
 import { Plus, DollarSign, User, X, RefreshCw } from 'lucide-react'
 
 type Stage = {
@@ -65,7 +66,24 @@ export default function PipelinePage() {
     loadPipeline()
     api.get('/api/contacts?limit=100').then(d => setContacts(d.contacts)).catch(() => {})
     const interval = setInterval(loadPipeline, 15000)
-    return () => clearInterval(interval)
+
+    const user = typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('user') || '{}') : {}
+    let socket: ReturnType<typeof getSocket> | null = null
+    if (user?.workspaceId) {
+      try {
+        socket = getSocket(user.workspaceId)
+        socket.on('conversation_updated', loadPipeline)
+        socket.on('deal_updated', loadPipeline)
+      } catch {}
+    }
+
+    return () => {
+      clearInterval(interval)
+      if (socket) {
+        socket.off('conversation_updated', loadPipeline)
+        socket.off('deal_updated', loadPipeline)
+      }
+    }
   }, [loadPipeline])
 
   async function moveDeal(deal: Deal, targetStageId: string) {

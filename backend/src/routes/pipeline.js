@@ -1,4 +1,5 @@
 import { db } from '../utils/db.js'
+import { emitToWorkspace } from '../services/realtime.js'
 
 export async function pipelineRoutes(fastify) {
   // Buscar pipeline completo (Kanban)
@@ -79,6 +80,7 @@ export async function pipelineRoutes(fastify) {
       [stageId, status, lostReason || null, id, workspaceId]
     )
 
+    emitToWorkspace(workspaceId, 'deal_updated', { dealId: id })
     return reply.send({ deal: result.rows[0] })
   })
 

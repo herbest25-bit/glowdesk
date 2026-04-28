@@ -429,6 +429,7 @@ export default function InboxPage() {
   const [showMoreMenu, setShowMoreMenu] = useState(false)
   const [viewingMap, setViewingMap] = useState<Record<string, string>>({}) // conversationId → agentName
   const selectedRef = useRef<Conversation | null>(null)
+  const [hoverMode, setHoverMode] = useState(false)
 
   const user = typeof window !== 'undefined'
     ? JSON.parse(localStorage.getItem('user') || '{}')
@@ -472,6 +473,7 @@ export default function InboxPage() {
       loadConversations()
     })
     socket.on('conversation_updated', () => loadConversations())
+    socket.on('deal_updated', () => loadConversations())
     socket.on('transfer_to_human', () => loadConversations())
     socket.on('channel_qrcode', ({ channelId, qrcode }: any) => {
       if (channelId === connectChannelIdRef.current) {
@@ -497,6 +499,7 @@ export default function InboxPage() {
     return () => {
       socket.off('new_message')
       socket.off('conversation_updated')
+      socket.off('deal_updated')
       socket.off('transfer_to_human')
       socket.off('channel_qrcode')
       socket.off('channel_connected')
@@ -517,7 +520,8 @@ export default function InboxPage() {
     } catch { }
   }
 
-  async function selectConversation(conv: Conversation) {
+  async function selectConversation(conv: Conversation, fromHover = false) {
+    if (!fromHover) setHoverMode(true)
     try {
       const socket = getSocket(user.workspaceId)
       if (selectedRef.current && selectedRef.current.id !== conv.id) {
@@ -889,7 +893,9 @@ export default function InboxPage() {
             </div>
           )}
           {filtered.map(conv => (
-            <button key={conv.id} onClick={() => selectConversation(conv)}
+            <button key={conv.id}
+              onClick={() => selectConversation(conv)}
+              onMouseEnter={() => { if (hoverMode && selected?.id !== conv.id) selectConversation(conv, true) }}
               className={`w-full text-left px-4 py-3 border-b border-white/[0.04] hover:bg-white/[0.03] transition-colors
                 ${selected?.id === conv.id ? 'bg-violet-500/10 border-l-2 border-l-violet-500' : ''}`}>
               <div className="flex items-start gap-3">
