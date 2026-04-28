@@ -430,6 +430,7 @@ export default function InboxPage() {
   const [viewingMap, setViewingMap] = useState<Record<string, string>>({}) // conversationId → agentName
   const selectedRef = useRef<Conversation | null>(null)
   const [hoverMode, setHoverMode] = useState(false)
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const user = typeof window !== 'undefined'
     ? JSON.parse(localStorage.getItem('user') || '{}')
@@ -895,7 +896,12 @@ export default function InboxPage() {
           {filtered.map(conv => (
             <button key={conv.id}
               onClick={() => selectConversation(conv)}
-              onMouseEnter={() => { if (hoverMode && selected?.id !== conv.id) selectConversation(conv, true) }}
+              onMouseEnter={() => {
+                if (!hoverMode || selected?.id === conv.id) return
+                if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
+                hoverTimerRef.current = setTimeout(() => selectConversation(conv, true), 300)
+              }}
+              onMouseLeave={() => { if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current) }}
               className={`w-full text-left px-4 py-3 border-b border-white/[0.04] hover:bg-white/[0.03] transition-colors
                 ${selected?.id === conv.id ? 'bg-violet-500/10 border-l-2 border-l-violet-500' : ''}`}>
               <div className="flex items-start gap-3">
