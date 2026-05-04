@@ -73,7 +73,9 @@ export default function OverviewPage() {
       const d = (dashboard as PromiseFulfilledResult<any>).value || {}
       const conversations = (convData as PromiseFulfilledResult<any>).value?.conversations || []
       const tasks = (tasksData as PromiseFulfilledResult<any>).value?.tasks || []
-      const stages = (pipelineData as PromiseFulfilledResult<any>).value?.pipeline?.stages || []
+      const pipelineVal = (pipelineData as PromiseFulfilledResult<any>).value || {}
+      const stages = pipelineVal.pipeline?.stages || []
+      const dealsByStage: Record<string, { value: number }[]> = pipelineVal.dealsByStage || {}
 
       const stageColors: Record<string, string> = {
         'Novo Lead':   '#7c3aed',
@@ -113,8 +115,8 @@ export default function OverviewPage() {
           }).length,
         },
         contacts: {
-          total:     dashboard.contacts?.new_contacts || 0,
-          new_today: dashboard.contacts?.new_contacts || 0,
+          total:     d.contacts?.new_contacts || 0,
+          new_today: d.contacts?.new_contacts || 0,
         },
         recent_conversations: conversations.slice(0, 6).map((c: {
           id: string; contact_name: string; contact_phone: string;
@@ -131,12 +133,15 @@ export default function OverviewPage() {
           lead_score:     c.lead_score || 0,
         })),
         recent_tasks:    tasks.slice(0, 5),
-        pipeline_stages: stages.map((s: { name: string; deals: { id: string; value: number }[] }) => ({
-          stage: s.name,
-          count: s.deals?.length || 0,
-          value: s.deals?.reduce((acc: number, d: { value: number }) => acc + (d.value || 0), 0) || 0,
-          color: stageColors[s.name] || '#7c3aed',
-        })),
+        pipeline_stages: stages.map((s: { id: string; name: string; color: string }) => {
+          const stageDeals = dealsByStage[s.id] || []
+          return {
+            stage: s.name,
+            count: stageDeals.length,
+            value: stageDeals.reduce((acc: number, deal: { value: number }) => acc + (Number(deal.value) || 0), 0),
+            color: s.color || stageColors[s.name] || '#7c3aed',
+          }
+        }),
       })
       setLastUpdate(new Date())
     } catch (e) {
