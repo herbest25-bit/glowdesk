@@ -50,6 +50,7 @@ export default function OverviewPage() {
   const [data, setData] = useState<Overview | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [loadError, setLoadError] = useState(false)
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date())
 
   useEffect(() => {
@@ -60,17 +61,19 @@ export default function OverviewPage() {
 
   async function load() {
     setRefreshing(true)
+    setLoadError(false)
     try {
-      const [dashboard, convData, tasksData, pipelineData] = await Promise.all([
+      const [dashboard, convData, tasksData, pipelineData] = await Promise.allSettled([
         api.get('/api/analytics/dashboard?period=1d'),
         api.get('/api/conversations?limit=6'),
         api.get('/api/tasks?limit=5'),
         api.get('/api/pipeline')
       ])
 
-      const conversations = convData.conversations || []
-      const tasks = tasksData.tasks || []
-      const stages = pipelineData.stages || []
+      const d = (dashboard as PromiseFulfilledResult<any>).value || {}
+      const conversations = (convData as PromiseFulfilledResult<any>).value?.conversations || []
+      const tasks = (tasksData as PromiseFulfilledResult<any>).value?.tasks || []
+      const stages = (pipelineData as PromiseFulfilledResult<any>).value?.pipeline?.stages || []
 
       const stageColors: Record<string, string> = {
         'Novo Lead':   '#7c3aed',
@@ -83,20 +86,20 @@ export default function OverviewPage() {
 
       setData({
         conversations: {
-          open:    dashboard.conversations?.open_count || 0,
-          bot:     dashboard.conversations?.bot_count || 0,
-          human:   (dashboard.conversations?.open_count || 0) - (dashboard.conversations?.bot_count || 0),
+          open:    d.conversations?.open_count || 0,
+          bot:     d.conversations?.bot_count || 0,
+          human:   (d.conversations?.open_count || 0) - (d.conversations?.bot_count || 0),
           waiting: 0,
         },
         messages: {
-          today:   dashboard.messages?.received || 0,
-          ai_sent: dashboard.messages?.ai_sent || 0,
+          today:   d.messages?.received || 0,
+          ai_sent: d.messages?.ai_sent || 0,
         },
         deals: {
-          open:           dashboard.deals?.open_deals || 0,
-          pipeline_value: dashboard.deals?.pipeline_value || 0,
-          won_today:      dashboard.deals?.won_deals || 0,
-          revenue_today:  dashboard.deals?.revenue || 0,
+          open:           d.deals?.open_deals || 0,
+          pipeline_value: d.deals?.pipeline_value || 0,
+          won_today:      d.deals?.won_deals || 0,
+          revenue_today:  d.deals?.revenue || 0,
         },
         tasks: {
           pending:  tasks.filter((t: { status: string }) => t.status !== 'done').length,
@@ -138,6 +141,7 @@ export default function OverviewPage() {
       setLastUpdate(new Date())
     } catch (e) {
       console.error(e)
+      setLoadError(true)
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -195,7 +199,16 @@ export default function OverviewPage() {
     </div>
   )
 
-  if (!data) return null
+  if (!data) return (
+    <div className="flex flex-col items-center justify-center h-full gap-4" style={{ color: '#5a5a6e' }}>
+      <p className="text-sm">{loadError ? 'Erro ao carregar dados.' : 'Carregando...'}</p>
+      {loadError && (
+        <button onClick={load} className="text-xs px-4 py-2 rounded-lg" style={{ background: 'rgba(124,58,237,0.2)', color: '#c4b5fd' }}>
+          Tentar novamente
+        </button>
+      )}
+    </div>
+  )
 
   return (
     <div className="p-6 space-y-6 overflow-auto">
